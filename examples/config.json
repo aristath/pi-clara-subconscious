@@ -1,0 +1,17 @@
+{
+  "dataDir": "./data",
+  "workspace": "~/agent-workspace",
+  "agentDir": "~/.pi/agent",
+  "initialRestMs": 300000,
+  "errorRetryMs": 30000,
+  "heartbeatMs": 3000,
+  "staleClientMs": 15000,
+  "model": null,
+  "allowedTools": [
+    "read", "ls", "find", "grep",
+    "type_configuration", "prepare_memory", "search_memory", "read_memory",
+    "memory_timeline", "compose_story", "save_memory", "save_entity", "save_topic", "save_story",
+    "presence_read", "presence_write"
+  ],
+  "additionalExtensionPaths": []
+}
