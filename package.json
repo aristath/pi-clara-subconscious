@@ -1,0 +1,16 @@
+{
+  "name": "pi-clara-subconscious",
+  "version": "0.1.0",
+  "description": "Independent private thinking and foreground-aware scheduling for the Pi agent",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi", "agent", "subconscious"],
+  "files": ["src", "examples", "README.md", "LICENSE"],
+  "bin": {"pi-clara-subconscious": "src/cli.js"},
+  "exports": {".": "./src/index.js", "./client": "./src/client.js", "./service": "./src/service.js"},
+  "pi": {"extensions": ["./src/extension.js"]},
+  "engines": {"node": ">=22.18"},
+  "scripts": {"test": "node --test --test-timeout=120000 test/*.test.js", "check": "npm test"},
+  "peerDependencies": {"@earendil-works/pi-coding-agent": "*", "@earendil-works/pi-ai": "*", "typebox": "*"},
+  "devDependencies": {"@earendil-works/pi-coding-agent": "1.5.2", "@earendil-works/pi-ai": "1.5.2", "typebox": "1.3.27"}
+}
