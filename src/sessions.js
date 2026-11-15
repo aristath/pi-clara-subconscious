@@ -81,27 +81,49 @@ export function assistantMessage(content, model) {
 
 // Decorate Pi's stream, rather than replacing the model/runtime or agent loop.
 // Pump independently: compaction can consume result() without iterating events.
-export function gateStream(original, gate, id, serviceSignal) {
+export function gateStream(original, gate, id, serviceSignal, observe = () => {}) {
   return (model, context, options = {}) => {
     const output = createAssistantMessageEventStream();
+    const observation = { queuedAt: Date.now(), model: { provider: model.provider, id: model.id }, context };
+    observe(observation);
     void (async () => {
       let release;
       try {
         release = await gate.privateStep('model', id, options.signal ?? serviceSignal);
+        observation.startedAt = Date.now();
         const stream = await original(model, context, options);
-        for await (const event of stream) output.push(event);
-        output.end(await stream.result());
+        for await (const event of stream) {
+          if (event.type.endsWith('_delta') && !observation.firstOutputAt) observation.firstOutputAt = Date.now();
+          output.push(event);
+        }
+        const result = await stream.result();
+        observation.usage = result.usage; observation.stopReason = result.stopReason;
+        output.end(result);
       } catch (error) {
         const message = { ...assistantMessage('', model), stopReason: options.signal?.aborted || serviceSignal?.aborted ? 'aborted' : 'error', errorMessage: error.message };
+        observation.error = error.message;
         output.push({ type: 'error', reason: message.stopReason, error: message }); output.end(message);
-      } finally { release?.(); }
+      } finally { observation.finishedAt = Date.now(); release?.(); }
     })();
     return output;
   };
 }
 
 export class PiSessions {
-  constructor(runtime, options = {}) { this.runtime = runtime; this.sessions = new Map(); this.createSession = options.createSession ?? createAgentSession; }
+  constructor(runtime, options = {}) { this.runtime = runtime; this.sessions = new Map(); this.observations = new Map(); this.createSession = options.createSession ?? createAgentSession; }
+  inspect(id, includeContext = false) {
+    const session = this.sessions.get(id);
+    const observation = this.observations.get(id);
+    const { context, ...request } = observation ?? {};
+    return {
+      streaming: session?.isStreaming ?? false,
+      currentMessage: session?.agent.state.streamingMessage ?? null,
+      pendingToolCalls: [...(session?.agent.state.pendingToolCalls ?? [])],
+      contextUsage: session?.getContextUsage() ?? null,
+      request: observation ? { ...request, messageCount: context?.messages?.length ?? 0 } : null,
+      ...(includeContext ? { context: context ?? null } : {}),
+    };
+  }
   async open(row) {
     if (this.sessions.has(row.id)) return this.sessions.get(row.id);
     const { config, store } = this.runtime;
@@ -136,7 +158,7 @@ export class PiSessions {
     }
     await this.selectModel(session, cwd);
     session.agent.toolExecution = 'sequential';
-    session.agent.streamFunction = gateStream(session.agent.streamFunction, this.runtime.gate, row.id, this.runtime.signal);
+    session.agent.streamFunction = gateStream(session.agent.streamFunction, this.runtime.gate, row.id, this.runtime.signal, observation => this.observations.set(row.id, observation));
     // The public Agent boundary hook ends one native Pi turn (assistant + tool
     // batch). Pi still performs all execution, persistence, compaction and retry.
     const finishTurn = session.agent.finishTurn;

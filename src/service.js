@@ -118,7 +118,7 @@ export class Coordinator {
   inspect(id, args = {}) {
     const row = this.store.row(id);
     const entries = row.sessionFile && existsSync(row.sessionFile) ? SessionManager.open(row.sessionFile).getEntries() : [];
-    return { conversation: structuredClone(row), ...boundedPage(entries, args) };
+    return { conversation: structuredClone(row), ...boundedPage(entries, args), transcriptWarning: row.sessionFile && !existsSync(row.sessionFile) ? 'The saved transcript is unavailable; it has not been deleted.' : null, live: this.sessions.inspect?.(id) ?? null };
   }
   resolveAction(args) {
     const action = this.store.state.actions[args.key];
@@ -148,6 +148,7 @@ export class Coordinator {
       case 'topic': { const result = this.store.topic(params, 'user', params.receipt ?? randomUUID()); this.gate.wake(); return result; }
       case 'list': return this.store.list();
       case 'read': return this.inspect(params.id, params);
+      case 'inspect.context': this.store.row(params.id); return this.sessions.inspect?.(params.id, true) ?? { context: null };
       case 'actions': return Object.entries(this.store.state.actions).filter(([, action]) => action.status === 'started').map(([key, action]) => ({ key, ...action, active: this.gate.active?.id === key, resolvable: this.store.row(action.conversationId).blockedAction === key && this.gate.active?.id !== key }));
       case 'resolve': return this.resolveAction(params);
       case 'foreground.update': this.foreground(params); return { registered: true };

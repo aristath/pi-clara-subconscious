@@ -364,3 +364,17 @@ They cover scheduling, permissions, yielding, delivery, restart recovery, normal
 package loading, clean artifact installation, and detached service operation.
 
 Licensed under [MIT](LICENSE).
+
+### Read-only inspection
+
+`read` now includes `live`: streaming state, the current partial assistant
+message, pending tool-call IDs, Pi's context-usage estimate and latest model
+request timings/usage. `inspect.context` with `{id}` returns that request's
+context at Pi's provider-stream boundary. This is the resolved model context,
+not the provider's wire-format HTTP body. Gate wait, first output and completion
+timestamps are observed without changing generation or scheduling.
+
+The latest request snapshot is held in memory per open private conversation;
+it becomes available after the next request and is not retained across service
+restarts. Durable session history remains available through `read`. Neither
+inspection method opens a session, starts work, or changes pause state.
