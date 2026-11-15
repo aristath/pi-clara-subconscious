@@ -46,11 +46,23 @@ export function originPresent(manager, source) {
   return Array.isArray(content) && content.some(part => part.type === 'toolCall' && part.id === source.callId && part.name === 'subconscious_reflect' && part.arguments.content === source.thought);
 }
 export function identityEntries(branch) {
-  const selected = branch.findLast(entry => entry.type === 'custom' && entry.customType === 'pi-souls:selection');
+  const selected = branch.findLast(entry => entry.type === 'custom' && entry.customType === 'pi-modular-soul:selection')
+    ?? branch.findLast(entry => entry.type === 'custom' && entry.customType === 'pi-souls:selection');
   return selected ? [{ customType: selected.customType, data: structuredClone(selected.data) }] : [];
 }
 function applyIdentity(manager, row, settings) {
-  const source = row.source?.identityEntries?.at(-1)?.data;
+  const identity = row.source?.identityEntries?.at(-1);
+  if (settings.modularSoul || identity?.customType === 'pi-modular-soul:selection') {
+    const current = manager.getBranch().findLast(entry => entry.type === 'custom' && entry.customType === 'pi-modular-soul:selection')?.data;
+    const soul = identity?.customType === 'pi-modular-soul:selection' ? identity.data?.soul
+      : identity?.data?.name && Object.hasOwn(settings.modularSoul?.souls ?? {}, identity.data.name) ? identity.data.name
+        : current?.soul ?? settings.modularSoul?.defaultSoul;
+    // A new private conversation inherits the identity, not foreground flags.
+    // Once bound, preserve this conversation's own optional selections each turn.
+    if (typeof soul === 'string' && current?.soul !== soul) manager.appendCustomEntry('pi-modular-soul:selection', { version: 1, soul, modules: [] });
+    return;
+  }
+  const source = identity?.data;
   const soul = settings.modelSouls?.[`${settings.defaultProvider}/${settings.defaultModel}`] ?? settings.defaultSoul;
   const selection = source ?? (typeof soul === 'string' ? { version: 1, name: soul } : settings.modelSouls || identityEntries(manager.getBranch()).length ? { version: 1, name: null, disabled: true } : undefined);
   if (selection && JSON.stringify(identityEntries(manager.getBranch()).at(-1)?.data) !== JSON.stringify(selection)) manager.appendCustomEntry('pi-souls:selection', selection);

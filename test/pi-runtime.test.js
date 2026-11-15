@@ -6,7 +6,7 @@ import { Type } from 'typebox';
 import { createAgentSession, SessionManager, ProjectTrustStore } from '@earendil-works/pi-coding-agent';
 import { Coordinator } from '../src/service.js';
 import { Store } from '../src/store.js';
-import { originContext } from '../src/sessions.js';
+import { originContext, identityEntries } from '../src/sessions.js';
 import { PRIVATE_MARKER } from '../src/private-extension.js';
 import { fixture, sdkFactory, fakeStream, deferred, output, call } from './helpers.js';
 
@@ -373,4 +373,39 @@ test('a missing optional integration is reported while independent thinking rema
   await coordinator.tick();
   assert.deepEqual(coordinator.missingTools.get('general'), ['missing_optional_tool']);
   assert.equal(coordinator.store.row('general').error, undefined);
+});
+
+test('modular identity inheritance resets foreground flags and preserves private flags on later steps', async t => {
+  const f = fixture(t);
+  const path = join(f.agentDir, 'settings.json'), settings = JSON.parse(readFileSync(path, 'utf8'));
+  writeFileSync(path, JSON.stringify({ ...settings, modularSoul: { defaultSoul: 'fictional-default', souls: {} } }));
+  let turns = 0;
+  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ session }) => {
+    turns++;
+    const current = identityEntries(session.sessionManager.getBranch()).at(-1);
+    assert.equal(current.customType, 'pi-modular-soul:selection');
+    assert.equal(current.data.soul, 'fictional-user');
+    assert.deepEqual(current.data.modules, turns === 1 ? [] : ['private-notes']);
+    if (turns === 1) session.sessionManager.appendCustomEntry('pi-modular-soul:selection', { version: 1, soul: 'fictional-user', modules: ['private-notes'] });
+    return output([call('subconscious_rest', { milliseconds: 0 })]);
+  }) });
+  t.after(() => coordinator.stop());
+  coordinator.store.change(() => { coordinator.store.row('general').source = { identityEntries: [{ customType: 'pi-modular-soul:selection', data: { version: 1, soul: 'fictional-user', modules: ['foreground-only'] } }] }; });
+  await coordinator.tick(); await coordinator.tick();
+  assert.equal(turns, 2);
+  const manager = SessionManager.open(coordinator.store.row('general').sessionFile);
+  assert.deepEqual(identityEntries(manager.getBranch()).at(-1).data.modules, ['private-notes']);
+});
+
+test('new modular configuration autoloads private defaults without legacy model-based identity', async t => {
+  const f = fixture(t);
+  const path = join(f.agentDir, 'settings.json'), settings = JSON.parse(readFileSync(path, 'utf8'));
+  writeFileSync(path, JSON.stringify({ ...settings, defaultSoul: 'legacy-default', modularSoul: { defaultSoul: 'fictional-current', souls: {} } }));
+  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ session }) => {
+    const entries = identityEntries(session.sessionManager.getBranch());
+    assert.deepEqual(entries.at(-1).data, { version: 1, soul: 'fictional-current', modules: [] });
+    assert.equal(session.sessionManager.getBranch().some(entry => entry.customType === 'pi-souls:selection'), false);
+    return output([call('subconscious_rest', { milliseconds: 0 })]);
+  }) });
+  t.after(() => coordinator.stop()); await coordinator.tick();
 });
