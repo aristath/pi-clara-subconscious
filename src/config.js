@@ -66,6 +66,7 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
     allowedTools: raw.allowedTools ?? DEFAULT_TOOLS,
     additionalExtensionPaths: [],
   };
+  assertProfilePath(config, dataDir);
   for (const key of ['initialRestMs', 'errorRetryMs', 'heartbeatMs', 'staleClientMs']) {
     if (!Number.isFinite(config[key]) || config[key] < 0) throw new Error(`${key} must be a nonnegative finite number`);
   }
