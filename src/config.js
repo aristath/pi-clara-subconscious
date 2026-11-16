@@ -1,3 +1,4 @@
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
@@ -25,7 +26,7 @@ export function expandPath(path, base = process.cwd()) {
   if (typeof path !== 'string' || !path.trim()) throw new Error('Expected a nonempty path');
   return path === '~' ? homedir() : path.startsWith('~/') ? join(homedir(), path.slice(2)) : resolve(base, path);
 }
-export function defaultConfigPath() { return join(homedir(), '.config', 'pi-clara-subconscious', 'config.json'); }
+export function defaultConfigPath() { return join(process.cwd(), '.pi', 'settings.json'); }
 export function assertProfilePath(config, path) {
   if (!config.profileRoot || !path) return;
   const target = resolve(path), roots = [config.profileRoot, ...(config.sourceRoots ?? [])].map(path => resolve(path));
@@ -43,18 +44,19 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
   path = expandPath(path);
   const input = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Configuration must be a JSON object');
-  const raw = { ...input, ...overrides };
-  const base = dirname(path);
-  let dataDir = expandPath(raw.dataDir ?? './data', base);
+  const base = dirname(dirname(path));
+  const agentDir = expandPath(overrides.agentDir ?? getAgentDir(), base);
+  const merged = SettingsManager.create(base, agentDir, { projectTrusted: true }).getSettings();
+  const raw = { ...merged.claraSubconscious, ...input.claraSubconscious, ...overrides };
+  let dataDir = expandPath(raw.dataDir ?? './subconscious', base);
   // Existing symlink aliases must share a coordinator.
   if (existsSync(dataDir)) dataDir = realpathSync(dataDir);
   const config = {
     configPath: path, dataDir,
-    workspace: expandPath(raw.workspace ?? '~', base),
-    agentDir: expandPath(raw.agentDir ?? '~/.pi/agent', base),
-    ...(raw.profileRoot ? { profileRoot: expandPath(raw.profileRoot, base) } : {}),
-    sourceRoots: (raw.sourceRoots ?? []).map(path => expandPath(path, base)),
-    ...(raw.sessionFactoryModule ? { sessionFactoryModule: expandPath(raw.sessionFactoryModule, base) } : {}),
+    workspace: base,
+    agentDir,
+    profileRoot: base, sourceRoots: [],
+    ...(overrides.sessionFactoryModule ? { sessionFactoryModule: expandPath(overrides.sessionFactoryModule, base) } : {}),
     initiallyPaused: raw.initiallyPaused === true,
     initialRestMs: raw.initialRestMs ?? 300000,
     errorRetryMs: raw.errorRetryMs ?? 30000,
@@ -62,7 +64,7 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
     staleClientMs: raw.staleClientMs ?? 15000,
     model: raw.model ?? null,
     allowedTools: raw.allowedTools ?? DEFAULT_TOOLS,
-    additionalExtensionPaths: (raw.additionalExtensionPaths ?? []).map(p => expandPath(p, base)),
+    additionalExtensionPaths: [],
   };
   for (const key of ['initialRestMs', 'errorRetryMs', 'heartbeatMs', 'staleClientMs']) {
     if (!Number.isFinite(config[key]) || config[key] < 0) throw new Error(`${key} must be a nonnegative finite number`);

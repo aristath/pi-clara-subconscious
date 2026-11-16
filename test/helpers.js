@@ -39,16 +39,18 @@ export function fakeStream(handler) {
 export function fixture(t, overrides = {}) {
   const root = mkdtempSync(join(tmpdir(), 'pcs-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const agentDir = join(root, 'agent'), workspace = join(root, 'workspace');
-  mkdirSync(agentDir); mkdirSync(workspace);
+  const workspace = join(root, 'workspace'), agentDir = join(workspace, 'agent');
+  mkdirSync(agentDir, { recursive: true }); mkdirSync(join(workspace, '.pi'), { recursive: true });
   const model = id => ({ id, name: id, reasoning: false, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 262144, maxTokens: 4096 });
   writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { synthetic: { api: 'openai-completions', baseUrl: 'http://synthetic.invalid/v1', apiKey: 'synthetic-test-value', models: [model('default'), model('override')] } } }));
-  const path = join(root, 'config.json');
-  writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ defaultProvider: 'synthetic', defaultModel: 'default', cacheWarming: 'off', retry: { enabled: false }, compaction: { enabled: false }, skills: ['!**'], claraSubconscious: { configPath: path } }));
-  const raw = { dataDir: join(root, 'data'), agentDir, workspace, initialRestMs: 0, heartbeatMs: 100, staleClientMs: 500, ...overrides };
-  writeFileSync(path, JSON.stringify(raw));
-  const config = loadConfig(path);
-  return { root, config, agentDir, workspace, writeConfig: extra => { writeFileSync(path, JSON.stringify({ ...raw, ...extra })); return loadConfig(path); } };
+  const path = join(workspace, '.pi', 'settings.json');
+  const raw = { dataDir: join(workspace, 'subconscious'), initialRestMs: 0, heartbeatMs: 100, staleClientMs: 500, ...overrides };
+  const settings = { defaultProvider: 'synthetic', defaultModel: 'default', cacheWarming: 'off', retry: { enabled: false }, compaction: { enabled: false }, skills: ['!**'], claraSubconscious: raw };
+  writeFileSync(join(agentDir, 'settings.json'), JSON.stringify(settings));
+  writeFileSync(path, JSON.stringify({ claraSubconscious: raw }));
+  const trusted = { agentDir, ...(overrides.sessionFactoryModule ? { sessionFactoryModule: overrides.sessionFactoryModule } : {}) };
+  const config = loadConfig(path, trusted);
+  return { root, config, agentDir, workspace, writeConfig: extra => { writeFileSync(path, JSON.stringify({ claraSubconscious: { ...raw, ...extra } })); return loadConfig(path, trusted); } };
 }
 export function sdkFactory(handler, onSession) {
   return async options => {

@@ -37,7 +37,7 @@ There is no npm registry publication implied by these instructions.
 Edit the generated configuration before enabling optional tools. Reload Pi after
 installing the extension. `/subconscious status` reports the coordinator state;
 the extension starts it automatically when a foreground session opens.
-`workspace` must name an existing directory.
+Start the service from the profile working directory, just as you start Pi.
 
 Start and stop it directly:
 
@@ -67,33 +67,36 @@ without systemd, use another supervisor with equivalent graceful-stop behavior.
 
 ## Configuration
 
-The default file is `~/.config/pi-clara-subconscious/config.json`. Select a
-different file with `--config PATH`, or with this setting in Pi's settings.json:
+Configuration is the `claraSubconscious` section of the profile’s native
+`.pi/settings.json`. Run the coordinator from that profile directory.
+`--config PATH` selects that Pi settings file explicitly.
 
 ```json
 {
   "claraSubconscious": {
-    "configPath": "~/.config/pi-clara-subconscious/config.json"
+    "dataDir": "./subconscious",
+    "initiallyPaused": true,
+    "initialRestMs": 300000,
+    "model": null
   }
 }
 ```
 
-All participating clients must select the same configuration/data store.
+All participating clients use the same profile settings and data store. The profile
+is the parent of `.pi/`. Pi’s native agent directory supplies installed packages.
+A host embedding Pi can pass trusted `--agent-dir` and `--factory` options.
 
 | Field | Meaning |
 | --- | --- |
-| `dataDir` | Private package state, session transcripts, socket, and service log. Default `./data`, relative to the config file. |
-| `workspace` | Pi working directory for general thinking and topics; defaults to the user's home. `init` records the directory where it is run. |
-| `agentDir` | Normal Pi agent configuration/packages directory; default `~/.pi/agent`. |
+| `dataDir` | Private state, transcripts, socket, and log. Default `./subconscious`, relative to the profile directory. |
 | `initialRestMs` | Initial delay and fallback after a topic/general turn that does not choose a rest; default 300000. Reflections do not use it. |
 | `model` | `null` follows Pi's configured foreground default; otherwise `{ "provider": "provider-id", "id": "model-id" }`. |
 | `allowedTools` | Exact external tool names; no wildcard permission grants. See below. |
-| `additionalExtensionPaths` | Additional trusted Pi extensions, loaded through the standard resource loader. Usually installed Pi packages need no entry here. |
 | `errorRetryMs` | Delay before retrying a technically failed conversation; default 30000. Other healthy conversations remain eligible. |
 | `heartbeatMs` | Foreground registration interval; default 3000, at least 100. |
 | `staleClientMs` | Staleness threshold, default 15000 and at least two heartbeat intervals. |
 
-An example is in [examples/config.json](examples/config.json). Restart the service
+An example is in [examples/pi-settings.json](examples/pi-settings.json). Restart the service
 and reload foreground Pi sessions after changing package configuration. Existing
 Pi model defaults are read again between private turns. Model changes do not
 replace transcripts or reset schedules.
@@ -229,7 +232,7 @@ must explicitly announce activity:
 ```js
 import { Client } from 'pi-clara-subconscious/client';
 
-const client = await new Client('/path/to/private/config.json').connect();
+const client = await new Client('/path/to/profile/.pi/settings.json').connect();
 const registration = {
   id: 'host-instance-session-id',
   pid: process.pid,

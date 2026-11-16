@@ -184,14 +184,14 @@ test('provider tool IDs reused on later turns remain distinct logical invocation
   assert.equal(Object.keys(coordinator.store.state.actions).length, 2);
 });
 
-test('previous-chat access covers Pi workspace folders and custom session directories but excludes private sessions', async t => {
+test('previous-chat access covers profile chat folders and excludes private sessions', async t => {
   const f = fixture(t);
-  const ordinary = SessionManager.create(f.workspace, join(f.agentDir, 'sessions', 'project-a'));
+  const ordinary = SessionManager.create(f.workspace, join(f.workspace, 'sessions', 'project-a'));
   ordinary.appendSessionInfo('Fictional project chat'); ordinary.appendMessage({ role: 'user', content: [{ type: 'text', text: 'A fictional project question.' }], timestamp: Date.now() });
-  const custom = join(f.root, 'custom-sessions');
+  const custom = join(f.workspace, 'sessions');
   const other = SessionManager.create(f.workspace, custom);
   other.appendSessionInfo('Fictional custom chat'); other.appendMessage({ role: 'user', content: [{ type: 'text', text: 'A fictional custom question.' }], timestamp: Date.now() });
-  const hidden = SessionManager.create(f.workspace, join(f.agentDir, 'sessions', 'project-b'));
+  const hidden = SessionManager.create(f.workspace, join(f.workspace, 'sessions', 'project-b'));
   hidden.appendCustomEntry(PRIVATE_MARKER, { conversationId: 'synthetic-private' });
   hidden.appendMessage({ role: 'user', content: [{ type: 'text', text: 'A private synthetic instruction.' }], timestamp: Date.now() });
   const settings = JSON.parse(readFileSync(join(f.agentDir, 'settings.json'), 'utf8'));
@@ -204,22 +204,9 @@ test('previous-chat access covers Pi workspace folders and custom session direct
   assert.equal(transcript.messages[0].content[0].text, 'A fictional custom question.');
 });
 
-test('a private model override retains the foreground SOUL selection pointer', async t => {
-  const f = fixture(t, { model: { provider: 'synthetic', id: 'override' } });
-  const settings = JSON.parse(readFileSync(join(f.agentDir, 'settings.json'), 'utf8'));
-  writeFileSync(join(f.agentDir, 'settings.json'), JSON.stringify({ ...settings, modelSouls: { 'synthetic/default': 'SharedSyntheticSoul', 'synthetic/override': 'DifferentSyntheticSoul' } }));
-  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(() => output([call('subconscious_rest', { milliseconds: 0 })])) });
-  t.after(() => coordinator.stop());
-  await coordinator.tick();
-  const row = coordinator.store.row('general');
-  const manager = SessionManager.open(row.sessionFile);
-  assert.equal(manager.getBranch().findLast(entry => entry.type === 'custom' && entry.customType === 'pi-souls:selection').data.name, 'SharedSyntheticSoul');
-  assert.equal(manager.buildSessionContext().model.modelId, 'override');
-});
-
 test('saved Pi project trust loads project packages/settings and does not change foreground cache warming', async t => {
   const f = fixture(t);
-  const project = join(f.workspace, '.pi'); mkdirSync(project);
+  const project = join(f.workspace, '.pi'); mkdirSync(project, { recursive: true });
   writeFileSync(join(project, 'settings.json'), JSON.stringify({ defaultModel: 'override' }));
   new ProjectTrustStore(f.agentDir).set(f.workspace, true);
   const settingsPath = join(f.agentDir, 'settings.json');
@@ -267,7 +254,7 @@ test('reflections continue without schedules until explicit finish; private hist
     return turns === 1 ? output([{ type: 'thinking', thinking: 'Synthetic private reasoning.' }, { type: 'text', text: 'Continue exploring.' }]) : output([call('subconscious_finish', {}, 'finish-reflection')]);
   }) });
   t.after(() => coordinator.stop());
-  const thought = coordinator.store.reflect('A fictional thought.', { file: '/synthetic/source.jsonl', sessionId: 'synthetic-source', callId: 'synthetic-origin', context: [] }, 'thought');
+  const thought = coordinator.store.reflect('A fictional thought.', { file: join(f.workspace, 'source.jsonl'), sessionId: 'synthetic-source', callId: 'synthetic-origin', context: [] }, 'thought');
   await coordinator.tick(); await coordinator.tick();
   assert.equal(turns, 2);
   assert.equal(coordinator.store.row(thought.id).status, 'finished');
@@ -397,14 +384,13 @@ test('modular identity inheritance resets foreground flags and preserves private
   assert.deepEqual(identityEntries(manager.getBranch()).at(-1).data.modules, ['private-notes']);
 });
 
-test('new modular configuration autoloads private defaults without legacy model-based identity', async t => {
+test('modular configuration autoloads private defaults', async t => {
   const f = fixture(t);
   const path = join(f.agentDir, 'settings.json'), settings = JSON.parse(readFileSync(path, 'utf8'));
-  writeFileSync(path, JSON.stringify({ ...settings, defaultSoul: 'legacy-default', modularSoul: { defaultSoul: 'fictional-current', souls: {} } }));
+  writeFileSync(path, JSON.stringify({ ...settings, modularSoul: { defaultSoul: 'fictional-current', souls: {} } }));
   const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ session }) => {
     const entries = identityEntries(session.sessionManager.getBranch());
     assert.deepEqual(entries.at(-1).data, { version: 1, soul: 'fictional-current', modules: [] });
-    assert.equal(session.sessionManager.getBranch().some(entry => entry.customType === 'pi-souls:selection'), false);
     return output([call('subconscious_rest', { milliseconds: 0 })]);
   }) });
   t.after(() => coordinator.stop()); await coordinator.tick();

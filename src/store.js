@@ -20,7 +20,7 @@ export class Store {
     mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
     chmodSync(config.dataDir, 0o700);
     this.path = join(config.dataDir, 'state.json');
-    const initialized = config.configPath && config.configPath + '.initialized';
+    const initialized = config.configPath && join(dirname(config.configPath), 'runtime', 'subconscious.initialized');
     if (initialized && existsSync(initialized) && !existsSync(this.path)) throw new Error('Private thinking state is temporarily unavailable; restore its original state file.');
     this.state = existsSync(this.path) ? JSON.parse(readFileSync(this.path, 'utf8')) : {
       version: 1, paused: config.initiallyPaused === true, conversations: {}, receipts: {}, deliveries: {}, actions: {}, chatPlans: {},

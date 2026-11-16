@@ -30,13 +30,16 @@ test('the real detached daemon runs a native Pi session after its launching CLI 
       });
     }`);
   rmSync(join(f.agentDir, 'models.json'));
-  const config = f.writeConfig({ additionalExtensionPaths: [provider] });
+  const settingsPath = join(f.agentDir, 'settings.json');
+  const settings = JSON.parse(readFileSync(settingsPath, 'utf8'));
+  writeFileSync(settingsPath, JSON.stringify({ ...settings, extensions: [provider] }));
+  const config = f.config;
   const client = new Client(config);
   t.after(async () => {
     try { await client.call('stop'); } catch { /* Child may already have stopped after a failed start. */ }
     await until(() => !existsSync(join(config.dataDir, 'service.lock')), 5000).catch(() => {});
   });
-  const child = spawn(process.execPath, [cli, 'start', '--config', config.configPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [cli, 'start', '--config', config.configPath, '--agent-dir', f.agentDir], { stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', data => { stdout += data; }); child.stderr.on('data', data => { stderr += data; });
   const code = await new Promise(resolve => child.once('exit', resolve));

@@ -128,7 +128,7 @@ test('starting a user-facing chat is receipt-bound, ordinary Pi storage, and sep
   assert.equal(manager.getSessionName(), 'A fictional hello');
   assert.equal(manager.buildSessionContext().messages.at(-1).role, 'assistant');
   assert.equal(manager.buildSessionContext().messages.at(-1).content[0].text, 'A synthetic opening.');
-  assert.equal(result.file.startsWith(join(config.agentDir, 'sessions')), true);
+  assert.equal(result.file.startsWith(join(config.workspace, 'sessions')), true);
   assert.equal((await coordinator.call('notifications')).length, 1);
   await coordinator.call('notification.ack', { id: result.id });
   assert.equal((await coordinator.call('notifications')).length, 0);

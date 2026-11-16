@@ -15,7 +15,7 @@ test('clean tarball installs, contains only public artifacts, and loads through 
   const files = result.files.map(file => file.path);
   assert.equal(files.includes('src/extension.js'), true);
   assert.equal(files.includes('src/cli.js'), true);
-  assert.equal(files.includes('examples/config.json'), true);
+  assert.equal(files.includes('examples/pi-settings.json'), true);
   assert.equal(files.some(path => /(?:node_modules|test\/|state\.json|service\.log|\.git\/|package-lock)/.test(path)), false);
   const install = join(f.root, 'install'); mkdirSync(install);
   writeFileSync(join(install, 'package.json'), JSON.stringify({ name: 'synthetic-install-check', private: true, type: 'module' }));

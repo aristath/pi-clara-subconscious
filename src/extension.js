@@ -5,7 +5,8 @@ import { loadConfig } from './config.js';
 import { identityEntries, deliveredIds } from './sessions.js';
 import { toolResult, PRIVATE_MARKER, RETURN_TYPE } from './private-extension.js';
 
-export default function subconsciousExtension(pi) {
+export function createExtension(deps = {}) {
+return function subconsciousExtension(pi) {
   let client, ctx, timer, clientId, running = false, entering = 0, disabled = false, lastWarning;
   const warn = error => {
     const message = error.message ?? String(error);
@@ -38,7 +39,7 @@ export default function subconsciousExtension(pi) {
     disabled = context.sessionManager.getEntries().some(entry => entry.type === 'custom' && entry.customType === PRIVATE_MARKER);
     if (disabled) return;
     ctx = context; clientId = randomUUID(); running = !context.isIdle();
-    client = new Client(loadConfig(pi.getSettings().claraSubconscious?.configPath));
+    client = new Client(loadConfig(pi.getSettings().claraSubconscious?.configPath, { agentDir: deps.agentDir ?? pi.getSettings().claraSubconscious?.agentDir, sessionFactoryModule: deps.sessionFactoryModule ?? pi.getSettings().claraSubconscious?.sessionFactoryModule }));
     try { await client.ensure(); await update(); } catch (error) { warn(error); }
     timer = setInterval(() => {
       // Also clears an input claim handled by another extension without a run.
@@ -120,3 +121,6 @@ export default function subconsciousExtension(pi) {
     },
   });
 }
+
+}
+export default createExtension();
