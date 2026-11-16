@@ -4,8 +4,10 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 
+export const TASK_MARKER = 'pi-clara-subconscious:task';
+
 export const INTERNAL_TOOLS = [
-  'subconscious_topics', 'subconscious_rest', 'subconscious_source',
+  'subconscious_source',
   'subconscious_return', 'subconscious_finish', 'subconscious_start_chat',
   'subconscious_chats',
 ];
@@ -58,7 +60,6 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
     profileRoot: base, sourceRoots: [],
     ...(overrides.sessionFactoryModule ? { sessionFactoryModule: expandPath(overrides.sessionFactoryModule, base) } : {}),
     initiallyPaused: raw.initiallyPaused === true,
-    initialRestMs: raw.initialRestMs ?? 300000,
     errorRetryMs: raw.errorRetryMs ?? 30000,
     heartbeatMs: raw.heartbeatMs ?? 3000,
     staleClientMs: raw.staleClientMs ?? 15000,
@@ -67,7 +68,7 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
     additionalExtensionPaths: [],
   };
   assertProfilePath(config, dataDir);
-  for (const key of ['initialRestMs', 'errorRetryMs', 'heartbeatMs', 'staleClientMs']) {
+  for (const key of ['errorRetryMs', 'heartbeatMs', 'staleClientMs']) {
     if (!Number.isFinite(config[key]) || config[key] < 0) throw new Error(`${key} must be a nonnegative finite number`);
   }
   if (config.heartbeatMs < 100 || config.staleClientMs < config.heartbeatMs * 2) throw new Error('staleClientMs must allow at least two heartbeats (heartbeatMs >= 100)');

@@ -10,7 +10,7 @@ import { assertProfilePath, expandPath } from './config.js';
 import { PiSessions, originContext, originPresent, deliveredIds, syncSession, sessionMatches, assistantMessage } from './sessions.js';
 
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } }
-function acquireLock(config) {
+export function acquireLock(config) {
   mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
   const path = join(config.dataDir, 'service.lock');
   const owner = join(path, 'owner.json');
@@ -152,7 +152,6 @@ export class Coordinator {
       case 'ping': return { pid: process.pid, storeId: this.config.storeId, stopping: this.stopping };
       case 'status': return { paused: this.store.state.paused, active: this.gate.active, clients: [...this.gate.clients].map(([id, value]) => ({ id, ...value, stale: Date.now() - value.seen > this.config.staleClientMs })), conversations: this.store.list(), pendingDeliveries: Object.values(this.store.state.deliveries).filter(delivery => delivery.status === 'pending').map(delivery => ({ id: delivery.id, sessionId: delivery.source.sessionId, file: delivery.source.file })), missingTools: Object.fromEntries(this.missingTools), errors: Object.fromEntries(this.errors) };
       case 'pause': this.store.change(state => { state.paused = params.paused !== false; }); this.gate.wake(); return { paused: this.store.state.paused };
-      case 'topic': { const result = this.store.topic(params, 'user', params.receipt ?? randomUUID()); this.gate.wake(); return result; }
       case 'list': return this.store.list();
       case 'read': return this.inspect(params.id, params);
       case 'inspect.context': this.store.row(params.id); return this.sessions.inspect?.(params.id, true) ?? { context: null };
@@ -198,11 +197,7 @@ export class Coordinator {
       const current = this.store.row(id);
       current.lastStep = result.completedAt; current.updatedAt = current.lastStep;
       delete current.retryAt; delete current.error; delete current.inProgress; delete current.wakeId; delete current.stepCompleted;
-      if (current.restMs !== undefined) {
-        current.nextWake = current.lastStep + current.restMs;
-        current.lastRestMs = current.restMs; delete current.restMs;
-      } else if (current.kind === 'reflection' || result.hasTools) current.nextWake = current.lastStep;
-      else current.nextWake = current.lastStep + this.config.initialRestMs;
+      current.nextWake = current.lastStep;
     });
   }
   async stop() {

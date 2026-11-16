@@ -4,36 +4,6 @@ import { Store } from '../src/store.js';
 import { loadConfig, allowedTool } from '../src/config.js';
 import { fixture } from './helpers.js';
 
-test('topic ownership is enforced, own topics can change and retire, receipts are idempotent', t => {
-  const { config } = fixture(t);
-  const store = new Store(config);
-  const user = store.topic({ action: 'create', title: 'Synthetic topic', content: 'A fictional subject.' }, 'user', 'user-create');
-  const own = store.topic({ action: 'create', title: 'Agent topic', content: 'A different fictional subject.' }, 'agent', 'agent-create');
-  assert.deepEqual(store.topic({ action: 'create', title: 'Ignored duplicate', content: 'Duplicate' }, 'agent', 'agent-create'), own);
-  assert.throws(() => store.topic({ action: 'update', id: user.id, content: 'Forbidden change' }, 'agent', 'bad-update'), /User-supplied/);
-  assert.throws(() => store.topic({ action: 'retire', id: user.id }, 'agent', 'bad-retire'), /User-supplied/);
-  assert.equal(store.row(user.id).content, 'A fictional subject.');
-  store.topic({ action: 'update', id: own.id, content: 'Revised fictional subject.' }, 'agent', 'own-update');
-  store.topic({ action: 'retire', id: own.id }, 'agent', 'own-retire');
-  const reloaded = new Store(config);
-  assert.equal(reloaded.row(own.id).status, 'retired');
-  assert.equal(reloaded.row(own.id).content, 'Revised fictional subject.');
-  assert.equal(reloaded.row('general').kind, 'general');
-});
-
-test('separate rest schedules allow zero without a hidden minimum', t => {
-  const { config } = fixture(t);
-  let now = 1000;
-  const store = new Store(config, () => now);
-  const a = store.topic({ action: 'create', title: 'Topic A', content: 'A' }, 'agent', 'a');
-  const b = store.topic({ action: 'create', title: 'Topic B', content: 'B' }, 'agent', 'b');
-  store.rest(a.id, 0, 'rest-a'); store.rest(b.id, 123, 'rest-b');
-  assert.equal(store.row(a.id).restMs, 0);
-  assert.equal(store.row(b.id).restMs, 123);
-  assert.equal(store.row('general').restMs, undefined);
-  assert.throws(() => store.rest(a.id, -1, 'negative'), /nonnegative/);
-});
-
 test('each reflection has its own source and can finish silently or return once', t => {
   const { config } = fixture(t);
   const store = new Store(config);
@@ -42,7 +12,6 @@ test('each reflection has its own source and can finish silently or return once'
   const b = store.reflect('Another synthetic thought.', { ...source, callId: 'other-call' }, 'reflect-b');
   assert.notEqual(a.id, b.id);
   assert.equal(store.reflect('Duplicate', source, 'reflect-a').id, a.id);
-  assert.throws(() => store.rest(a.id, 100, 'bad-rest'), /not reflections/);
   store.finish(a.id, undefined, 'finish-a');
   assert.equal(store.row(a.id).status, 'finished');
   assert.equal(store.state.deliveries[a.id], undefined);

@@ -2,7 +2,6 @@
   "claraSubconscious": {
     "dataDir": "./subconscious",
     "initiallyPaused": true,
-    "initialRestMs": 300000,
     "model": null
   }
 }

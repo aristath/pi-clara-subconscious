@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
 import { Type } from 'typebox';
 import { Client } from './client.js';
-import { loadConfig } from './config.js';
+import { loadConfig, TASK_MARKER } from './config.js';
 import { identityEntries, deliveredIds } from './sessions.js';
 import { toolResult, PRIVATE_MARKER, RETURN_TYPE } from './private-extension.js';
 
@@ -36,10 +37,10 @@ return function subconsciousExtension(pi) {
     ctx = undefined; client = undefined;
   }
   pi.on('session_start', async (_event, context) => {
-    disabled = context.sessionManager.getEntries().some(entry => entry.type === 'custom' && entry.customType === PRIVATE_MARKER);
+    disabled = context.sessionManager.getEntries().some(entry => entry.type === 'custom' && [PRIVATE_MARKER, TASK_MARKER].includes(entry.customType));
     if (disabled) return;
     ctx = context; clientId = randomUUID(); running = !context.isIdle();
-    client = new Client(loadConfig(pi.getSettings().claraSubconscious?.configPath, { agentDir: deps.agentDir ?? pi.getSettings().claraSubconscious?.agentDir, sessionFactoryModule: deps.sessionFactoryModule ?? pi.getSettings().claraSubconscious?.sessionFactoryModule }));
+    client = new Client(loadConfig(pi.getSettings().claraSubconscious?.configPath ?? join(context.cwd, '.pi/settings.json'), { agentDir: deps.agentDir ?? pi.getSettings().claraSubconscious?.agentDir, sessionFactoryModule: deps.sessionFactoryModule ?? pi.getSettings().claraSubconscious?.sessionFactoryModule }));
     try { await client.ensure(); await update(); } catch (error) { warn(error); }
     timer = setInterval(() => {
       // Also clears an input claim handled by another extension without a run.
@@ -105,7 +106,7 @@ return function subconsciousExtension(pi) {
     },
   });
   pi.registerCommand('subconscious', {
-    description: 'Private thinking: status, pause, resume, list, read <id>, topic <JSON>, actions, resolve <JSON>, notifications',
+    description: 'Private thinking: status, pause, resume, list, read <id>, actions, resolve <JSON>, notifications',
     async handler(args, context) {
       if (disabled || !client) return;
       const [command = 'status', ...tail] = args.trim().split(/\s+/);
@@ -114,9 +115,9 @@ return function subconsciousExtension(pi) {
       let result;
       if (command === 'pause' || command === 'resume') result = await client.call('pause', { paused: command === 'pause' });
       else if (command === 'read') result = await client.call('read', { id: tail[0], offset: Number(tail[1] ?? 0) });
-      else if (command === 'topic' || command === 'resolve') result = await client.call(command, JSON.parse(value));
+      else if (command === 'resolve') result = await client.call(command, JSON.parse(value));
       else if (['status', 'list', 'actions', 'notifications'].includes(command)) result = await client.call(command);
-      else throw new Error('Use status, pause, resume, list, read <id>, topic <JSON>, actions, resolve <JSON>, or notifications');
+      else throw new Error('Use status, pause, resume, list, read <id>, actions, resolve <JSON>, or notifications');
       pi.sendMessage({ customType: 'pi-clara-subconscious:inspection', content: JSON.stringify(result, null, 2), display: true }, { triggerTurn: false });
     },
   });

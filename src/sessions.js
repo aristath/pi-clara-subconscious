@@ -232,7 +232,7 @@ export class PiSessions {
     applyIdentity(session.sessionManager, row, currentSettings(cwd, config.agentDir).getSettings());
     await this.selectModel(session, cwd);
     const wakeId = this.runtime.store.row(row.id).wakeId;
-    await session.sendCustomMessage({ customType: 'pi-clara-subconscious:wake', content: row.kind === 'reflection' ? `Continue your private reflection. Original thought:\n${row.content}` : 'Continue your private time. The runtime has admitted this turn while foreground chats are idle.', display: false, details: { wakeId } }, { triggerTurn: true });
+    await session.sendCustomMessage({ customType: 'pi-clara-subconscious:wake', content: `Continue your private reflection. Original thought:\n${row.content}`, display: false, details: { wakeId } }, { triggerTurn: true });
     syncSession(session.sessionManager);
     const last = session.messages.findLast(message => message.role === 'assistant');
     if (last?.stopReason === 'error' || last?.stopReason === 'aborted') throw new Error(last.errorMessage ?? 'Private generation failed');

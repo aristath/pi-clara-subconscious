@@ -26,10 +26,7 @@ export class Store {
       version: 1, paused: config.initiallyPaused === true, conversations: {}, receipts: {}, deliveries: {}, actions: {}, chatPlans: {},
     };
     if (this.state.version !== 1 || !this.state.conversations || !this.state.receipts || !this.state.deliveries || !this.state.actions) throw new Error('Cannot read package state; original state was preserved');
-    if (!this.state.conversations.general) {
-      this.state.conversations.general = { id: 'general', kind: 'general', owner: 'agent', title: 'General private thinking', content: '', status: 'active', nextWake: now() + config.initialRestMs, createdAt: now(), updatedAt: now() };
-      this.save();
-    }
+    if (!existsSync(this.path)) this.save();
     if (initialized && !existsSync(initialized)) durableWrite(initialized, JSON.stringify({ dataDir: config.dataDir }) + '\n');
   }
   save() { durableWrite(this.path, JSON.stringify(this.state, null, 2) + '\n'); }
@@ -53,27 +50,6 @@ export class Store {
     return row;
   }
   list() { return Object.values(this.state.conversations).map(row => structuredClone(row)); }
-  topic(args, actor, key) {
-    if (args.action === 'list') return this.list().filter(row => row.kind === 'topic');
-    if (args.action === 'read') return structuredClone(this.row(args.id));
-    return this.once(key, state => {
-      if (args.action === 'create') {
-        const id = randomUUID();
-        state.conversations[id] = { id, kind: 'topic', owner: actor, title: text(args.title, 'title'), content: text(args.content, 'content'), status: 'active', nextWake: this.now() + this.config.initialRestMs, createdAt: this.now(), updatedAt: this.now() };
-        return structuredClone(state.conversations[id]);
-      }
-      const row = this.row(args.id);
-      if (row.kind !== 'topic') throw new Error('Only topic conversations can be changed here');
-      if (actor === 'agent' && row.owner !== 'agent') throw new Error('User-supplied topics cannot be changed or retired by the agent');
-      if (args.action === 'update') {
-        if (args.title !== undefined) row.title = text(args.title, 'title');
-        if (args.content !== undefined) row.content = text(args.content, 'content');
-      } else if (args.action === 'retire') row.status = 'retired';
-      else throw new Error('Unknown topic action');
-      row.updatedAt = this.now();
-      return structuredClone(row);
-    });
-  }
   reflect(content, source, key) {
     return this.once(key, state => {
       if (!source?.file || !source?.sessionId || !source?.callId) throw new Error('Reflection needs a trusted originating Pi invocation');
@@ -81,15 +57,6 @@ export class Store {
       const row = { id, kind: 'reflection', owner: 'agent', title: 'Private reflection', content: text(content, 'content'), source, status: 'active', nextWake: this.now(), createdAt: this.now(), updatedAt: this.now() };
       state.conversations[id] = row;
       return structuredClone(row);
-    });
-  }
-  rest(id, milliseconds, key) {
-    if (!Number.isFinite(milliseconds) || milliseconds < 0) throw new Error('Rest must be nonnegative milliseconds');
-    return this.once(key, () => {
-      const row = this.row(id);
-      if (row.kind === 'reflection' || row.status !== 'active') throw new Error('Rest belongs to active topic/general conversations, not reflections');
-      row.restMs = milliseconds;
-      return { milliseconds, nextWake: null };
     });
   }
   finish(id, content, key) {
@@ -108,7 +75,7 @@ export class Store {
   }
   due() {
     const now = this.now();
-    return this.list().filter(row => row.status === 'active' && !row.blocked && (row.retryAt ?? row.nextWake) <= now)
+    return this.list().filter(row => row.kind === 'reflection' && row.status === 'active' && !row.blocked && (row.retryAt ?? row.nextWake) <= now)
       .sort((a, b) => (a.lastStep ?? 0) - (b.lastStep ?? 0) || a.nextWake - b.nextWake);
   }
 }

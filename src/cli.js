@@ -18,13 +18,13 @@ export async function main(argv = process.argv.slice(2)) {
   const config = loadConfig(take('--config'), { agentDir: take('--agent-dir'), sessionFactoryModule: take('--factory') });
   const command = args.shift() ?? 'status';
   if (command === 'help' || command === '--help') {
-    console.log('pi-clara-subconscious [--config PATH] init|start|serve|stop|status|pause|resume|list|read ID [OFFSET]|topic JSON|actions|resolve JSON|notifications|ack ID|unregister CLIENT_ID');
+    console.log('pi-clara-subconscious [--config PATH] init|start|serve|stop|status|pause|resume|list|read ID [OFFSET]|actions|resolve JSON|notifications|ack ID|unregister CLIENT_ID');
     return;
   }
   if (command === 'init') {
     const document = readable(config.configPath) ? JSON.parse(readFileSync(config.configPath, 'utf8')) : {};
     if (document.claraSubconscious) throw new Error('claraSubconscious is already configured in Pi settings');
-    document.claraSubconscious = { dataDir: './subconscious', initiallyPaused: true, initialRestMs: config.initialRestMs, model: null, allowedTools: config.allowedTools };
+    document.claraSubconscious = { dataDir: './subconscious', initiallyPaused: true, model: null, allowedTools: config.allowedTools };
     durableWrite(config.configPath, JSON.stringify(document, null, 2) + '\n');
     console.log(`Created ${config.configPath}`); return;
   }
@@ -40,7 +40,7 @@ export async function main(argv = process.argv.slice(2)) {
   let method = command, params = {};
   if (command === 'pause' || command === 'resume') { method = 'pause'; params.paused = command === 'pause'; }
   else if (command === 'read') params = { id: args[0], offset: Number(args[1] ?? 0) };
-  else if (command === 'topic' || command === 'resolve') params = JSON.parse(args.join(' '));
+  else if (command === 'resolve') params = JSON.parse(args.join(' '));
   else if (command === 'ack') { method = 'notification.ack'; params.id = args[0]; }
   else if (command === 'unregister') { method = 'foreground.leave'; params.id = args[0]; }
   else if (!['status', 'stop', 'list', 'actions', 'notifications'].includes(command)) throw new Error('Unknown command; use help');

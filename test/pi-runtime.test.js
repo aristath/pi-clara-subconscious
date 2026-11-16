@@ -17,7 +17,7 @@ test('real Pi sessions yield between generation and pending tools without cancel
   const coordinator = new Coordinator(config, { createSession: sdkFactory(async ({ options }) => {
     generations++; entered.resolve(); await finish.promise;
     assert.equal(options.signal.aborted, false);
-    return output([call('read', { path }, 'read-note'), call('subconscious_rest', { milliseconds: 73 }, 'choose-rest')]);
+    return output([call('read', { path }, 'read-note'), call('subconscious_chats', { action: 'list' }, 'list-chats')]);
   }) });
   t.after(() => coordinator.stop());
   const work = coordinator.tick(); await entered.promise;
@@ -27,8 +27,8 @@ test('real Pi sessions yield between generation and pending tools without cancel
   assert.equal(Object.keys(coordinator.store.state.actions).length, 0);
   coordinator.gate.update('foreground', { pid: process.pid, busy: false });
   await work;
-  const row = coordinator.store.row('general');
-  assert.equal(row.nextWake, row.lastStep + 73);
+  const row = coordinator.store.row('sample-reflection');
+  assert.equal(row.nextWake, row.lastStep);
   const messages = SessionManager.open(row.sessionFile).buildSessionContext().messages;
   assert.equal(messages.filter(message => message.role === 'toolResult').length, 2);
   assert.match(messages.find(message => message.role === 'toolResult' && message.toolCallId === 'read-note').content[0].text, /fictional note/);
@@ -54,32 +54,8 @@ test('pause lets an executing tool finish, then keeps the conversation and sched
   finish.resolve(); await work;
   assert.equal(calls, 1);
   assert.equal(await coordinator.tick(), false);
-  assert.equal(coordinator.store.row('general').status, 'active');
+  assert.equal(coordinator.store.row('sample-reflection').status, 'active');
   assert.equal(new Store(f.config).state.paused, true);
-});
-
-test('topics use separate native conversations and retain independent wake times across restart', async t => {
-  const f = fixture(t);
-  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ session }) => {
-    const id = session.sessionManager.getEntries().find(entry => entry.type === 'custom' && entry.customType === PRIVATE_MARKER).data.conversationId;
-    const rest = coordinator.store.row(id).title === 'Topic A' ? 10000 : 20000;
-    return output([{ type: 'text', text: `Synthetic content for ${id}` }, call('subconscious_rest', { milliseconds: rest })]);
-  }) });
-  t.after(() => coordinator.stop());
-  coordinator.store.change(() => { coordinator.store.row('general').nextWake = Date.now() + 60000; });
-  const a = coordinator.store.topic({ action: 'create', title: 'Topic A', content: 'Fictional subject A' }, 'user', 'a');
-  const b = coordinator.store.topic({ action: 'create', title: 'Topic B', content: 'Fictional subject B' }, 'agent', 'b');
-  await coordinator.tick(); await coordinator.tick();
-  const first = coordinator.store.row(a.id), second = coordinator.store.row(b.id);
-  assert.notEqual(first.sessionFile, second.sessionFile);
-  assert.equal(first.nextWake, first.lastStep + 10000);
-  assert.equal(second.nextWake, second.lastStep + 20000);
-  assert.equal(JSON.stringify(SessionManager.open(first.sessionFile).buildSessionContext()).includes(`Synthetic content for ${b.id}`), false);
-  await coordinator.stop();
-  const reloaded = new Coordinator(f.config);
-  t.after(() => reloaded.stop());
-  assert.equal(reloaded.store.row(a.id).nextWake, first.nextWake);
-  assert.equal(reloaded.store.row(b.id).nextWake, second.nextWake);
 });
 
 test('inspection retains synthetic image content in native Pi tool results', async t => {
@@ -92,7 +68,7 @@ test('inspection retains synthetic image content in native Pi tool results', asy
   } });
   t.after(() => coordinator.stop());
   await coordinator.tick();
-  const transcript = coordinator.inspect('general', { limit: 100 });
+  const transcript = coordinator.inspect('sample-reflection', { limit: 100 });
   const image = transcript.entries.find(entry => entry.type === 'message' && entry.message.role === 'toolResult').message.content.find(part => part.type === 'image');
   assert.equal(image.mimeType, 'image/png'); assert.equal(image.data, pixel);
 });
@@ -125,7 +101,7 @@ test('normal configured packages supply identity, memories, web, media and Prese
   await coordinator.tick();
   assert.match(prompt, /Synthetic shared SOUL identity/);
   assert.deepEqual(readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line).name), ['save_memory', 'search_memory', 'web_search', 'generate_image', 'presence_write']);
-  assert.equal(coordinator.missingTools.get('general').length, 0);
+  assert.equal(coordinator.missingTools.get('sample-reflection').length, 0);
 });
 
 test('forbidden and nested tool calls cannot execute even when another tool attempts them', async t => {
@@ -144,7 +120,7 @@ test('forbidden and nested tool calls cannot execute even when another tool atte
   await coordinator.tick();
   assert.equal(existsSync(target), false);
   assert.equal(nestedResult.isError, true);
-  const row = coordinator.store.row('general');
+  const row = coordinator.store.row('sample-reflection');
   const results = SessionManager.open(row.sessionFile).buildSessionContext().messages.filter(message => message.role === 'toolResult');
   assert.equal(results.length, 3);
   assert.equal(results.every(result => result.isError), true);
@@ -153,7 +129,7 @@ test('forbidden and nested tool calls cannot execute even when another tool atte
 test('private model override and fallback use current Pi settings', async t => {
   const f = fixture(t);
   const seen = [];
-  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ model }) => { seen.push(model.id); return output([call('subconscious_rest', { milliseconds: 0 })]); }) });
+  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ model }) => { seen.push(model.id); return output([call('subconscious_chats', { action: 'list' })]); }) });
   t.after(() => coordinator.stop());
   await coordinator.tick();
   assert.equal(seen[0], 'default');
@@ -163,22 +139,22 @@ test('private model override and fallback use current Pi settings', async t => {
   writeFileSync(join(f.agentDir, 'settings.json'), JSON.stringify(settings));
   await coordinator.stop();
   const overrideConfig = f.writeConfig({ model: { provider: 'synthetic', id: 'override' } });
-  const overridden = new Coordinator(overrideConfig, { createSession: sdkFactory(({ model }) => { seen.push(model.id); return output([call('subconscious_rest', { milliseconds: 0 })]); }) });
+  const overridden = new Coordinator(overrideConfig, { createSession: sdkFactory(({ model }) => { seen.push(model.id); return output([call('subconscious_chats', { action: 'list' })]); }) });
   t.after(() => overridden.stop());
   await overridden.tick();
   assert.equal(seen.at(-1), 'override');
   await overridden.stop();
-  const fallback = new Coordinator(f.writeConfig({ model: null }), { createSession: sdkFactory(({ model }) => { seen.push(model.id); return output([call('subconscious_rest', { milliseconds: 0 })]); }) });
+  const fallback = new Coordinator(f.writeConfig({ model: null }), { createSession: sdkFactory(({ model }) => { seen.push(model.id); return output([call('subconscious_chats', { action: 'list' })]); }) });
   t.after(() => fallback.stop());
   await fallback.tick(); assert.equal(seen.at(-1), 'default');
 });
 
 test('provider tool IDs reused on later turns remain distinct logical invocations', async t => {
   const f = fixture(t);
-  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(() => output([call('subconscious_rest', { milliseconds: 0 }, 'provider-reused-id')])) });
+  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(() => output([call('subconscious_chats', { action: 'list' }, 'provider-reused-id')])) });
   t.after(() => coordinator.stop());
   await coordinator.tick(); await coordinator.tick();
-  const results = SessionManager.open(coordinator.store.row('general').sessionFile).buildSessionContext().messages.filter(message => message.role === 'toolResult');
+  const results = SessionManager.open(coordinator.store.row('sample-reflection').sessionFile).buildSessionContext().messages.filter(message => message.role === 'toolResult');
   assert.equal(results.length, 2);
   assert.equal(results.every(result => !result.isError), true);
   assert.equal(Object.keys(coordinator.store.state.actions).length, 2);
@@ -217,7 +193,7 @@ test('saved Pi project trust loads project packages/settings and does not change
     selected = model.id;
     assert.equal(session.settingsManager.isProjectTrusted(), true);
     assert.equal(session.settingsManager.getCacheWarmingMode(), 'off');
-    return output([call('subconscious_rest', { milliseconds: 1000 })]);
+    return output([call('subconscious_chats', { action: 'list' })]);
   }) });
   t.after(() => coordinator.stop());
   await coordinator.tick();
@@ -234,7 +210,7 @@ test('native Pi compaction uses the same model gate and retains a persisted comp
   const coordinator = new Coordinator(f.config, { createSession: sdkFactory(() => { requests++; return output(requests <= 3 ? 'A fictional conversation worth summarizing. '.repeat(100) : 'A synthetic compacted summary.'); }) });
   t.after(() => coordinator.stop());
   await coordinator.tick(); await coordinator.tick(); await coordinator.tick();
-  const session = coordinator.sessions.sessions.get('general');
+  const session = coordinator.sessions.sessions.get('sample-reflection');
   coordinator.gate.update('foreground', { pid: process.pid, busy: true });
   const compacting = session.compact();
   compacting.catch(() => {});
@@ -293,7 +269,7 @@ test('known completed tool results are recovered; unknown side effects are isola
   const f = fixture(t, { initialRestMs: 60000 });
   const coordinator = new Coordinator(f.config);
   t.after(() => coordinator.stop());
-  const row = coordinator.store.topic({ action: 'create', title: 'Recovery topic', content: 'Fictional subject' }, 'agent', 'topic');
+  const row = coordinator.store.reflect('A synthetic recovery thought.', { file: join(f.workspace, 'source.jsonl'), sessionId: 'synthetic-source', callId: 'recovery', context: [] }, 'recovery');
   const manager = SessionManager.create(f.workspace, join(f.config.dataDir, 'sessions'));
   manager.appendCustomEntry(PRIVATE_MARKER, { conversationId: row.id });
   manager.appendMessage({ role: 'user', content: [{ type: 'text', text: 'Synthetic wake' }], timestamp: Date.now() });
@@ -317,10 +293,10 @@ test('known completed tool results are recovered; unknown side effects are isola
 
 test('a missing committed transcript is preserved as unavailable and resumes when the same file returns', async t => {
   const f = fixture(t);
-  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(() => output([call('subconscious_rest', { milliseconds: 0 })])) });
+  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(() => output([call('subconscious_chats', { action: 'list' })])) });
   t.after(() => coordinator.stop());
   await coordinator.tick();
-  const row = coordinator.store.row('general');
+  const row = coordinator.store.row('sample-reflection');
   const file = row.sessionFile, retained = `${file}.temporarily-unavailable`;
   await coordinator.sessions.close();
   renameSync(file, retained);
@@ -335,7 +311,7 @@ test('a missing committed transcript is preserved as unavailable and resumes whe
 test('a persisted Pi result automatically settles a previously unknown tool outcome', async t => {
   const f = fixture(t, { initialRestMs: 60000 });
   const store = new Store(f.config);
-  const row = store.topic({ action: 'create', title: 'Fictional recovery', content: 'Synthetic subject' }, 'agent', 'create');
+  const row = store.reflect('Synthetic recovery thought.', { file: join(f.workspace, 'source.jsonl'), sessionId: 'synthetic', callId: 'create', context: [] }, 'create');
   const manager = SessionManager.create(f.workspace, join(f.config.dataDir, 'sessions'));
   manager.appendCustomEntry(PRIVATE_MARKER, { conversationId: row.id });
   manager.appendMessage({ role: 'user', content: [{ type: 'text', text: 'Synthetic wake' }], timestamp: Date.now() });
@@ -358,8 +334,8 @@ test('a missing optional integration is reported while independent thinking rema
   const coordinator = new Coordinator(f.config, { createSession: sdkFactory(() => output('A fictional thought without the optional integration.')) });
   t.after(() => coordinator.stop());
   await coordinator.tick();
-  assert.deepEqual(coordinator.missingTools.get('general'), ['missing_optional_tool']);
-  assert.equal(coordinator.store.row('general').error, undefined);
+  assert.deepEqual(coordinator.missingTools.get('sample-reflection'), ['missing_optional_tool']);
+  assert.equal(coordinator.store.row('sample-reflection').error, undefined);
 });
 
 test('modular identity inheritance resets foreground flags and preserves private flags on later steps', async t => {
@@ -374,13 +350,13 @@ test('modular identity inheritance resets foreground flags and preserves private
     assert.equal(current.data.soul, 'fictional-user');
     assert.deepEqual(current.data.modules, turns === 1 ? [] : ['private-notes']);
     if (turns === 1) session.sessionManager.appendCustomEntry('pi-modular-soul:selection', { version: 1, soul: 'fictional-user', modules: ['private-notes'] });
-    return output([call('subconscious_rest', { milliseconds: 0 })]);
+    return output([call('subconscious_chats', { action: 'list' })]);
   }) });
   t.after(() => coordinator.stop());
-  coordinator.store.change(() => { coordinator.store.row('general').source = { identityEntries: [{ customType: 'pi-modular-soul:selection', data: { version: 1, soul: 'fictional-user', modules: ['foreground-only'] } }] }; });
+  coordinator.store.change(() => { coordinator.store.row('sample-reflection').source = { identityEntries: [{ customType: 'pi-modular-soul:selection', data: { version: 1, soul: 'fictional-user', modules: ['foreground-only'] } }] }; });
   await coordinator.tick(); await coordinator.tick();
   assert.equal(turns, 2);
-  const manager = SessionManager.open(coordinator.store.row('general').sessionFile);
+  const manager = SessionManager.open(coordinator.store.row('sample-reflection').sessionFile);
   assert.deepEqual(identityEntries(manager.getBranch()).at(-1).data.modules, ['private-notes']);
 });
 
@@ -391,7 +367,7 @@ test('modular configuration autoloads private defaults', async t => {
   const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ session }) => {
     const entries = identityEntries(session.sessionManager.getBranch());
     assert.deepEqual(entries.at(-1).data, { version: 1, soul: 'fictional-current', modules: [] });
-    return output([call('subconscious_rest', { milliseconds: 0 })]);
+    return output([call('subconscious_chats', { action: 'list' })]);
   }) });
   t.after(() => coordinator.stop()); await coordinator.tick();
 });

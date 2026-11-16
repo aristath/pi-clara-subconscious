@@ -8,7 +8,7 @@ import { Coordinator } from '../src/service.js';
 import { Store } from '../src/store.js';
 
 test('a profile cannot inspect another profile through private transcript paths or symlinks', async t => {
-  const f = fixture(t);
+  const f = fixture(t, { initiallyPaused: true });
   const config = { ...f.config, dataDir: join(f.workspace, 'subconscious'), profileRoot: f.workspace, initiallyPaused: true };
   const coordinator = new Coordinator(config, { sessions: { async close() {} } });
   t.after(() => coordinator.stop());
@@ -16,11 +16,11 @@ test('a profile cannot inspect another profile through private transcript paths 
   const outside = join(f.root, 'other-user'); mkdirSync(outside);
   const other = SessionManager.create(outside, join(outside, 'sessions'));
   other.appendMessage({ role: 'user', content: 'Private to the other profile', timestamp: 1 });
-  coordinator.store.change(state => { state.conversations.general.sessionFile = other.getSessionFile(); });
-  assert.throws(() => coordinator.inspect('general'), /another profile/);
+  coordinator.store.change(state => { state.conversations['sample-reflection'].sessionFile = other.getSessionFile(); });
+  assert.throws(() => coordinator.inspect('sample-reflection'), /another profile/);
   symlinkSync(outside, join(f.workspace, 'shortcut'));
-  coordinator.store.change(state => { state.conversations.general.sessionFile = join(f.workspace, 'shortcut', 'not-yet-created.jsonl'); });
-  assert.throws(() => coordinator.inspect('general'), /outside/);
+  coordinator.store.change(state => { state.conversations['sample-reflection'].sessionFile = join(f.workspace, 'shortcut', 'not-yet-created.jsonl'); });
+  assert.throws(() => coordinator.inspect('sample-reflection'), /outside/);
   unlinkSync(coordinator.store.path);
   assert.throws(() => new Store(config), /temporarily unavailable/);
 });

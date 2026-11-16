@@ -47,7 +47,7 @@ test('the foreground tool creates an actual receipt tied to its persisted invoca
   const session = await foreground(f.config, extension, () => ++request === 1 ? output([call('subconscious_reflect', { content: 'A synthetic thought to explore.' }, 'real-reflection-call')]) : output('A synthetic acknowledgement.'));
   t.after(async () => { await closeSession(session); await service.close(); });
   await session.prompt('Consider a fictional subject.');
-  const reflections = service.coordinator.store.list().filter(row => row.kind === 'reflection');
+  const reflections = service.coordinator.store.list().filter(row => row.kind === 'reflection' && row.id !== 'sample-reflection');
   assert.equal(reflections.length, 1);
   assert.equal(reflections[0].content, 'A synthetic thought to explore.');
   assert.equal(reflections[0].source.sessionId, session.sessionManager.getSessionId());

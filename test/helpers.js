@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createAgentSession, SessionManager, DefaultResourceLoader } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { loadConfig } from '../src/config.js';
+import { Store } from '../src/store.js';
 import { assistantMessage as nativeAssistantMessage } from '../src/sessions.js';
 export const syntheticModel = { api: 'synthetic-api', provider: 'synthetic', id: 'default' };
 export const assistantMessage = content => nativeAssistantMessage(content, syntheticModel);
@@ -50,6 +51,8 @@ export function fixture(t, overrides = {}) {
   writeFileSync(path, JSON.stringify({ claraSubconscious: raw }));
   const trusted = { agentDir, ...(overrides.sessionFactoryModule ? { sessionFactoryModule: overrides.sessionFactoryModule } : {}) };
   const config = loadConfig(path, trusted);
+  const store = new Store(config), now = Date.now();
+  store.change(state => { state.conversations['sample-reflection'] = { id: 'sample-reflection', kind: 'reflection', owner: 'agent', title: 'Synthetic reflection', content: 'A synthetic thought.', status: 'active', source: { file: join(workspace, 'source.jsonl'), sessionId: 'synthetic-source', callId: 'synthetic-origin', context: [] }, nextWake: now + (overrides.initialRestMs ?? 0), createdAt: now, updatedAt: now }; });
   return { root, config, agentDir, workspace, writeConfig: extra => { writeFileSync(path, JSON.stringify({ claraSubconscious: { ...raw, ...extra } })); return loadConfig(path, trusted); } };
 }
 export function sdkFactory(handler, onSession) {

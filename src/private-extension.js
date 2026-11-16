@@ -19,11 +19,6 @@ export function createPrivateExtension(runtime, conversation) {
         return toolResult(await execute(args, receipt, ctx));
       },
     });
-    register('subconscious_topics', 'List/read private topics, or create/update/retire your own topics. User topics are read-only.', Type.Object({
-      action: Type.Union(['list', 'read', 'create', 'update', 'retire'].map(value => Type.Literal(value))), id: optional(), title: optional(), content: optional(),
-    }), (args, receipt) => store.topic(args, 'agent', receipt));
-    register('subconscious_rest', 'Choose this topic/general conversation’s next rest in milliseconds, including zero. Not available for reflections.', Type.Object({ milliseconds: Type.Number({ minimum: 0 }) }),
-      (args, receipt) => store.rest(conversation.id, args.milliseconds, receipt));
     register('subconscious_source', 'Read the originating context of this reflection. The source is selected by the runtime.', Type.Object({}), () => {
       const row = store.row(conversation.id);
       if (row.kind !== 'reflection') throw new Error('Only reflections have an originating chat');
@@ -46,11 +41,9 @@ export function createPrivateExtension(runtime, conversation) {
         customType: 'pi-clara-subconscious:instructions', display: false,
         content: [
           'This is your private thinking, not a message from a user. Keep your normal SOUL and identity. You may explore without producing a useful conclusion or a report.',
-          row.kind === 'reflection'
-            ? 'Follow the thought in this private conversation until you decide it is finished. Use subconscious_return for a selected contribution, or subconscious_finish to end silently. There is no rest schedule for a reflection.'
-            : 'Continue this ongoing private conversation. Choose when to rest with subconscious_rest; zero is allowed. Each conversation has its own schedule. You may manage your own topics; user-supplied topics are read-only.',
+          'Follow the thought in this private conversation until you decide it is finished. Use subconscious_return for a selected contribution, or subconscious_finish to end silently.',
           'Only explicitly available tools can act. Shell commands, general file changes, tool wrappers, and delegation are unavailable. Songya saves are optional and separate from returning a reflection. Starting a user-facing chat is an explicit separate action.',
-          row.kind === 'general' ? 'This is your general space for thoughts outside a specific topic.' : `Current ${row.kind}: ${row.title}\n${row.content}`,
+          `Original thought: ${row.content}`,
           unavailable.length ? `Configured integrations currently unavailable: ${unavailable.join(', ')}. Continue with the tools that are available; do not claim unavailable actions occurred.` : '',
         ].filter(Boolean).join('\n\n'),
       } };

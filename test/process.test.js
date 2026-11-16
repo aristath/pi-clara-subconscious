@@ -8,7 +8,7 @@ import { Client } from '../src/client.js';
 import { fixture, until } from './helpers.js';
 
 const cli = fileURLToPath(new URL('../src/cli.js', import.meta.url));
-test('the real detached daemon runs a native Pi session after its launching CLI exits', async t => {
+test('the detached reflection daemon finishes a native turn and preserves pause across restart', async t => {
   const f = fixture(t);
   const provider = join(f.root, 'synthetic-provider.js');
   const marker = join(f.root, 'provider-calls.jsonl');
@@ -23,7 +23,7 @@ test('the real detached daemon runs a native Pi session after its launching CLI 
         streamSimple(model, context) {
           appendFileSync(${JSON.stringify(marker)}, JSON.stringify({model:model.id})+'\\n');
           const stream = createAssistantMessageEventStream();
-          const message = { role:'assistant', content:[{type:'toolCall',id:'rest-'+Date.now(),name:'subconscious_rest',arguments:{milliseconds:100}}],api:model.api,provider:model.provider,model:model.id,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:'toolUse',timestamp:Date.now() };
+          const message = { role:'assistant', content:[{type:'toolCall',id:'rest-'+Date.now(),name:'subconscious_finish',arguments:{}}],api:model.api,provider:model.provider,model:model.id,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:'toolUse',timestamp:Date.now() };
           queueMicrotask(() => { stream.push({type:'done',reason:'toolUse',message}); stream.end(message); });
           return stream;
         }
@@ -46,12 +46,11 @@ test('the real detached daemon runs a native Pi session after its launching CLI 
   assert.equal(code, 0, stderr);
   assert.match(stdout, /Coordinator running/);
   const count = () => existsSync(marker) ? readFileSync(marker, 'utf8').trim().split('\n').length : 0;
-  const atLauncherExit = count();
-  await until(async () => count() > atLauncherExit && (await client.call('status')).conversations.find(row => row.id === 'general')?.lastRestMs === 100, 10000).catch(error => { throw new Error(`${error.message}\n${readFileSync(join(config.dataDir, 'service.log'), 'utf8')}`); });
+  await until(async () => count() === 1 && (await client.call('status')).conversations.find(row => row.id === 'sample-reflection')?.status === 'finished', 10000).catch(error => { throw new Error(`${error.message}\n${readFileSync(join(config.dataDir, 'service.log'), 'utf8')}`); });
   assert.equal((await client.call('status')).clients.length, 0);
   const list = await client.call('list');
-  assert.equal(list[0].kind, 'general');
-  const transcript = await client.call('read', { id: 'general' });
+  assert.equal(list[0].kind, 'reflection');
+  const transcript = await client.call('read', { id: 'sample-reflection' });
   assert.equal(transcript.entries.some(entry => entry.type === 'message' && entry.message.role === 'toolResult'), true);
   await client.call('pause', { paused: true });
   await until(async () => !(await client.call('status')).active);

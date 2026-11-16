@@ -17,12 +17,12 @@ function source(config, id = 'source-call') {
   return { manager, source: originContext(manager, id) };
 }
 
-test('scheduler respects independent rests and pause, serializes work and retains general conversation', async t => {
+test('reflection processing respects pause and serializes work', async t => {
   const { config } = fixture(t);
   const entered = deferred(), finish = deferred();
   let count = 0;
   const coordinator = new Coordinator(config, { sessions: {
-    async step(row) { count++; entered.resolve(); await finish.promise; coordinator.store.rest(row.id, 0, 'synthetic-rest'); return { hasTools: true }; },
+    async step(row) { count++; entered.resolve(); await finish.promise; return { hasTools: true }; },
     async close() {},
   } });
   const run = coordinator.tick(); await entered.promise;
@@ -30,7 +30,7 @@ test('scheduler respects independent rests and pause, serializes work and retain
   await coordinator.call('pause', { paused: true });
   finish.resolve(); await run;
   assert.equal(count, 1);
-  assert.equal(coordinator.store.row('general').nextWake, coordinator.store.row('general').lastStep);
+  assert.equal(coordinator.store.row('sample-reflection').nextWake, coordinator.store.row('sample-reflection').lastStep);
   assert.equal(await coordinator.tick(), false);
   assert.equal(new Store(config).state.paused, true);
   await coordinator.call('pause', { paused: false });
@@ -38,16 +38,16 @@ test('scheduler respects independent rests and pause, serializes work and retain
   await coordinator.stop();
 });
 
-test('one failed conversation does not block a healthy topic', async t => {
+test('one failed reflection does not block another reflection', async t => {
   const { config } = fixture(t, { errorRetryMs: 60000 });
   const seen = [];
   const coordinator = new Coordinator(config, { sessions: {
-    async step(row) { seen.push(row.id); if (row.id === 'general') throw new Error('Synthetic integration unavailable'); return { hasTools: false }; }, async close() {},
+    async step(row) { seen.push(row.id); if (row.id === 'sample-reflection') throw new Error('Synthetic integration unavailable'); return { hasTools: false }; }, async close() {},
   } });
-  const topic = coordinator.store.topic({ action: 'create', title: 'Healthy topic', content: 'Fictional subject' }, 'user', 'topic');
+  const topic = coordinator.store.reflect('Healthy thought.', { file: join(config.workspace, 'other-source.jsonl'), sessionId: 'other-source', callId: 'healthy', context: [] }, 'healthy');
   await coordinator.tick(); await coordinator.tick();
-  assert.deepEqual(seen, ['general', topic.id]);
-  assert.match(coordinator.store.row('general').error, /unavailable/);
+  assert.deepEqual(seen, ['sample-reflection', topic.id]);
+  assert.match(coordinator.store.row('sample-reflection').error, /unavailable/);
   await coordinator.stop();
 });
 
@@ -137,13 +137,13 @@ test('starting a user-facing chat is receipt-bound, ordinary Pi storage, and sep
   await coordinator.stop(); await reloaded.stop();
 });
 
-test('a completed turn is recovered without another model request or resetting its chosen rest', async t => {
+test('a completed reflection turn is recovered without another model request', async t => {
   const { config } = fixture(t);
   const store = new Store(config);
-  store.change(() => { Object.assign(store.row('general'), { inProgress: true, wakeId: 'synthetic-wake', restMs: 17, stepCompleted: { wakeId: 'synthetic-wake', completedAt: 1000, hasTools: true } }); });
+  store.change(() => { Object.assign(store.row('sample-reflection'), { inProgress: true, wakeId: 'synthetic-wake', stepCompleted: { wakeId: 'synthetic-wake', completedAt: 1000, hasTools: true } }); });
   const coordinator = new Coordinator(config, { sessions: { async close() {} } });
-  assert.equal(coordinator.store.row('general').nextWake, 1017);
-  assert.equal(coordinator.store.row('general').inProgress, undefined);
+  assert.equal(coordinator.store.row('sample-reflection').nextWake, 1000);
+  assert.equal(coordinator.store.row('sample-reflection').inProgress, undefined);
   await coordinator.stop();
 });
 
