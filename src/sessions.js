@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { SessionManager, createAgentSession, DefaultResourceLoader, SettingsManager, ProjectTrustStore, hasTrustRequiringProjectResources } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { createPrivateExtension, PRIVATE_MARKER, RETURN_TYPE } from './private-extension.js';
-import { INTERNAL_TOOLS, expandPath } from './config.js';
+import { INTERNAL_TOOLS, expandPath, assertProfilePath } from './config.js';
 
 export function syncSession(manager) {
   const path = manager.getSessionFile();
@@ -127,7 +127,8 @@ export class PiSessions {
   async open(row) {
     if (this.sessions.has(row.id)) return this.sessions.get(row.id);
     const { config, store } = this.runtime;
-    const cwd = row.source?.cwd ?? config.workspace;
+    for (const path of [row.source?.file, row.sessionFile]) assertProfilePath(config, path);
+    const cwd = config.profileRoot ? config.workspace : row.source?.cwd ?? config.workspace;
     let manager;
     if (row.sessionFile && existsSync(row.sessionFile)) {
       manager = SessionManager.open(row.sessionFile);
@@ -144,14 +145,19 @@ export class PiSessions {
     }
     this.recoverTools(row, manager);
     if (store.row(row.id).blocked) throw new Error(store.row(row.id).blocked);
-    const settingsManager = privateSettings(cwd, config.agentDir);
-    const resourceLoader = new DefaultResourceLoader({
-      cwd, agentDir: config.agentDir, additionalExtensionPaths: config.additionalExtensionPaths,
-      settingsManager,
-      extensionFactories: [{ name: 'pi-clara-subconscious-private', factory: createPrivateExtension(this.runtime, row) }],
-    });
-    await resourceLoader.reload();
-    const result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, resourceLoader, settingsManager, tools: [...config.allowedTools, ...INTERNAL_TOOLS] });
+    const privateExtension = { name: 'pi-clara-subconscious-private', factory: createPrivateExtension(this.runtime, row) };
+    let result;
+    if (config.sessionFactoryModule) {
+      result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, tools: [...config.allowedTools, ...INTERNAL_TOOLS] }, { privateExtension });
+    } else {
+      const settingsManager = privateSettings(cwd, config.agentDir);
+      const resourceLoader = new DefaultResourceLoader({
+        cwd, agentDir: config.agentDir, additionalExtensionPaths: config.additionalExtensionPaths,
+        settingsManager, extensionFactories: [privateExtension],
+      });
+      await resourceLoader.reload();
+      result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, resourceLoader, settingsManager, tools: [...config.allowedTools, ...INTERNAL_TOOLS] });
+    }
     const { session } = result;
     if (result.extensionsResult?.errors?.some(error => error.path?.includes('pi-clara-subconscious-private'))) {
       session.dispose(); throw new Error('Private tool enforcement failed to load');
@@ -222,8 +228,9 @@ export class PiSessions {
   }
   async step(row) {
     const session = await this.open(row);
-    applyIdentity(session.sessionManager, row, currentSettings(row.source?.cwd ?? this.runtime.config.workspace, this.runtime.config.agentDir).getSettings());
-    await this.selectModel(session, row.source?.cwd ?? this.runtime.config.workspace);
+    const config = this.runtime.config, cwd = config.profileRoot ? config.workspace : row.source?.cwd ?? config.workspace;
+    applyIdentity(session.sessionManager, row, currentSettings(cwd, config.agentDir).getSettings());
+    await this.selectModel(session, cwd);
     const wakeId = this.runtime.store.row(row.id).wakeId;
     await session.sendCustomMessage({ customType: 'pi-clara-subconscious:wake', content: row.kind === 'reflection' ? `Continue your private reflection. Original thought:\n${row.content}` : 'Continue your private time. The runtime has admitted this turn while foreground chats are idle.', display: false, details: { wakeId } }, { triggerTurn: true });
     syncSession(session.sessionManager);
@@ -246,6 +253,7 @@ export class PiSessions {
     for (const row of this.runtime.store.list()) {
       if (!row.sessionFile || !existsSync(row.sessionFile)) continue;
       try {
+        assertProfilePath(this.runtime.config, row.sessionFile);
         const manager = SessionManager.open(row.sessionFile);
         this.recoverTools(row, manager);
         if (!row.inProgress || row.stepCompleted || this.runtime.store.row(row.id).blocked) continue;
@@ -267,16 +275,16 @@ export class PiSessions {
   }
   async chats(args) {
     const { config } = this.runtime;
-    const root = join(config.agentDir, 'sessions');
+    const root = config.profileRoot ? join(config.profileRoot, 'sessions') : join(config.agentDir, 'sessions');
     const dirs = new Set([root]);
     if (existsSync(root)) for (const dir of readdirSync(root, { withFileTypes: true })) if (dir.isDirectory() || dir.isSymbolicLink()) dirs.add(join(root, dir.name));
     const custom = SettingsManager.create(config.workspace, config.agentDir).getSessionDir();
-    if (custom) dirs.add(expandPath(custom, config.workspace));
+    if (custom && !config.profileRoot) dirs.add(expandPath(custom, config.workspace));
     const all = [...new Map((await Promise.all([...dirs].map(async dir => {
       try { return await SessionManager.listAll(dir); } catch (error) { this.runtime.errors.set(`chats:${dir}`, error.message); return []; }
     }))).flat().map(row => [row.path, row])).values()].sort((a, b) => new Date(b.modified) - new Date(a.modified));
     const rows = all.filter(row => {
-      try { return !SessionManager.open(row.path).getEntries().some(entry => entry.type === 'custom' && entry.customType === PRIVATE_MARKER); } catch { return false; }
+      try { assertProfilePath(config, row.path); return !SessionManager.open(row.path).getEntries().some(entry => entry.type === 'custom' && entry.customType === PRIVATE_MARKER); } catch { return false; }
     });
     const key = path => createHash('sha256').update(path).digest('hex');
     if (args.action === 'list') return rows.slice(args.offset ?? 0, (args.offset ?? 0) + (args.limit ?? 30)).map(row => ({ id: key(row.path), title: row.name ?? row.firstMessage, modified: row.modified }));

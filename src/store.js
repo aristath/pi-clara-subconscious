@@ -20,14 +20,17 @@ export class Store {
     mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
     chmodSync(config.dataDir, 0o700);
     this.path = join(config.dataDir, 'state.json');
+    const initialized = config.configPath && config.configPath + '.initialized';
+    if (initialized && existsSync(initialized) && !existsSync(this.path)) throw new Error('Private thinking state is temporarily unavailable; restore its original state file.');
     this.state = existsSync(this.path) ? JSON.parse(readFileSync(this.path, 'utf8')) : {
-      version: 1, paused: false, conversations: {}, receipts: {}, deliveries: {}, actions: {}, chatPlans: {},
+      version: 1, paused: config.initiallyPaused === true, conversations: {}, receipts: {}, deliveries: {}, actions: {}, chatPlans: {},
     };
     if (this.state.version !== 1 || !this.state.conversations || !this.state.receipts || !this.state.deliveries || !this.state.actions) throw new Error('Cannot read package state; original state was preserved');
     if (!this.state.conversations.general) {
       this.state.conversations.general = { id: 'general', kind: 'general', owner: 'agent', title: 'General private thinking', content: '', status: 'active', nextWake: now() + config.initialRestMs, createdAt: now(), updatedAt: now() };
       this.save();
     }
+    if (initialized && !existsSync(initialized)) durableWrite(initialized, JSON.stringify({ dataDir: config.dataDir }) + '\n');
   }
   save() { durableWrite(this.path, JSON.stringify(this.state, null, 2) + '\n'); }
   change(fn) {

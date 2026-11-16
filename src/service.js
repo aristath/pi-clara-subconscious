@@ -2,9 +2,11 @@ import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, chmodSync, statSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { Store, text } from './store.js';
 import { Gate } from './gate.js';
+import { assertProfilePath, expandPath } from './config.js';
 import { PiSessions, originContext, originPresent, deliveredIds, syncSession, sessionMatches, assistantMessage } from './sessions.js';
 
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } }
@@ -55,18 +57,21 @@ export class Coordinator {
     text(args.title, 'title'); text(args.message, 'message');
     let manager;
     const plan = store.state.chatPlans[key];
-    if (plan) manager = SessionManager.open(plan.file);
+    if (plan) { assertProfilePath(config, plan.file); manager = SessionManager.open(plan.file); }
     else {
       const settings = SettingsManager.create(config.workspace, config.agentDir);
       // Pi's documented per-workspace session directory convention. An explicit
       // Pi sessionDir setting takes precedence; no private session folder here.
       const safePath = `--${config.workspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
-      manager = SessionManager.create(config.workspace, settings.getSessionDir() ?? join(config.agentDir, 'sessions', safePath));
+      const sessionDirectory = config.profileRoot ? join(config.profileRoot, 'sessions') :
+        settings.getSessionDir() ? expandPath(settings.getSessionDir(), config.workspace) : join(config.agentDir, 'sessions', safePath);
+      manager = SessionManager.create(config.workspace, sessionDirectory);
       const metadata = { api: model?.api, provider: model?.provider, id: model?.id };
       assistantMessage(args.message, metadata);
       store.change(state => { state.chatPlans[key] = { file: manager.getSessionFile(), title: args.title, message: args.message, model: metadata }; });
     }
     const saved = store.state.chatPlans[key];
+    assertProfilePath(config, manager.getSessionFile());
     if (!manager.getEntries().some(entry => entry.type === 'custom' && entry.customType === 'pi-clara-subconscious:opening' && entry.data?.receipt === key)) {
       manager.appendCustomEntry('pi-clara-subconscious:opening', { receipt: key });
       manager.appendSessionInfo(saved.title);
@@ -92,6 +97,7 @@ export class Coordinator {
   sourceClient(id) {
     const client = this.gate.clients.get(id);
     if (!client) throw new Error('Foreground registration expired; reconnect before continuing');
+    assertProfilePath(this.config, client.file);
     if (!sessionMatches({ file: client.file, sessionId: client.sessionId })) throw new Error('The registered source Pi session is unavailable');
     return client;
   }
@@ -117,6 +123,7 @@ export class Coordinator {
   }
   inspect(id, args = {}) {
     const row = this.store.row(id);
+    assertProfilePath(this.config, row.sessionFile);
     const entries = row.sessionFile && existsSync(row.sessionFile) ? SessionManager.open(row.sessionFile).getEntries() : [];
     return { conversation: structuredClone(row), ...boundedPage(entries, args), transcriptWarning: row.sessionFile && !existsSync(row.sessionFile) ? 'The saved transcript is unavailable; it has not been deleted.' : null, live: this.sessions.inspect?.(id) ?? null };
   }
@@ -210,6 +217,10 @@ export class Coordinator {
 }
 
 export async function startService(config, options = {}) {
+  if (config.sessionFactoryModule && !options.createSession) {
+    const { createPrivateSession } = await import(pathToFileURL(config.sessionFactoryModule));
+    options = { ...options, createSession: createPrivateSession };
+  }
   const releaseLock = acquireLock(config);
   let coordinator, server;
   try {
