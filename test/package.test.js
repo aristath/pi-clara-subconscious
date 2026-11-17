@@ -20,7 +20,7 @@ test('clean tarball installs, contains only public artifacts, and loads through 
   const install = join(f.root, 'install'); mkdirSync(install);
   writeFileSync(join(install, 'package.json'), JSON.stringify({ name: 'synthetic-install-check', private: true, type: 'module' }));
   execFileSync('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', join(f.root, result.filename)], { cwd: install, encoding: 'utf8', stdio: 'pipe', timeout: 120000 });
-  const installed = join(install, 'node_modules', 'pi-clara-subconscious');
+  const installed = join(install, 'node_modules', 'pi-subconscious');
   const manifest = JSON.parse(readFileSync(join(installed, 'package.json'), 'utf8'));
   for (const range of Object.values(manifest.peerDependencies)) assert.equal(range, '*');
   assert.equal(manifest.dependencies, undefined);

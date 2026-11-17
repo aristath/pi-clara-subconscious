@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 
+// Persisted session markers keep their original IDs across package renames.
 export const TASK_MARKER = 'pi-clara-subconscious:task';
 
 export const INTERNAL_TOOLS = [

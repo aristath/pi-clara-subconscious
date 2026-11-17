@@ -3,8 +3,8 @@ Description=Pi private thinking coordinator
 
 [Service]
 Type=simple
-# Replace the executable path with the output of: command -v pi-clara-subconscious
-ExecStart=/usr/local/bin/pi-clara-subconscious serve
+# Replace the executable path with the output of: command -v pi-subconscious
+ExecStart=/usr/local/bin/pi-subconscious serve
 Restart=on-failure
 RestartSec=3
 TimeoutStopSec=infinity

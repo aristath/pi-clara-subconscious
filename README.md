@@ -1,4 +1,4 @@
-# pi-clara-subconscious
+# pi-subconscious
 
 Clara’s scheduled tasks and chat-triggered private reflections, using native Pi
 sessions and the user’s existing SOUL, settings, model, and tools.
@@ -53,7 +53,7 @@ Requires Linux, Node.js 22.18+, and Pi 1.5.2+.
 
 ```sh
 git clone <repository-url>
-cd pi-clara-subconscious
+cd pi-subconscious
 npm install
 pi install .
 ```
@@ -99,11 +99,11 @@ The current heartbeat, stale-client, and error-retry options remain available as
 Run the reflection coordinator from the owner’s profile directory:
 
 ```sh
-node /path/to/pi-clara-subconscious/src/cli.js serve --config .pi/settings.json
+node /path/to/pi-subconscious/src/cli.js serve --config .pi/settings.json
 ```
 
 An embedding host can supply its trusted `--agent-dir` and `--factory` arguments.
-The supplied [systemd unit](examples/pi-clara-subconscious.service) allows a
+The supplied [systemd unit](examples/pi-subconscious.service) allows a
 current call to finish during shutdown. Use an equivalent supervisor when systemd
 is unavailable.
 

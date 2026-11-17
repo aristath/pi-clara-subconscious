@@ -145,7 +145,7 @@ export class PiSessions {
     }
     this.recoverTools(row, manager);
     if (store.row(row.id).blocked) throw new Error(store.row(row.id).blocked);
-    const privateExtension = { name: 'pi-clara-subconscious-private', factory: createPrivateExtension(this.runtime, row) };
+    const privateExtension = { name: 'pi-subconscious-private', factory: createPrivateExtension(this.runtime, row) };
     let result;
     if (config.sessionFactoryModule) {
       result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, tools: [...config.allowedTools, ...INTERNAL_TOOLS] }, { privateExtension });
@@ -159,7 +159,7 @@ export class PiSessions {
       result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, resourceLoader, settingsManager, tools: [...config.allowedTools, ...INTERNAL_TOOLS] });
     }
     const { session } = result;
-    if (result.extensionsResult?.errors?.some(error => error.path?.includes('pi-clara-subconscious-private'))) {
+    if (result.extensionsResult?.errors?.some(error => error.path?.includes('pi-subconscious-private'))) {
       session.dispose(); throw new Error('Private tool enforcement failed to load');
     }
     await this.selectModel(session, cwd);

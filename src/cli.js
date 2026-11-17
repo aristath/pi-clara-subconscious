@@ -18,7 +18,7 @@ export async function main(argv = process.argv.slice(2)) {
   const config = loadConfig(take('--config'), { agentDir: take('--agent-dir'), sessionFactoryModule: take('--factory') });
   const command = args.shift() ?? 'status';
   if (command === 'help' || command === '--help') {
-    console.log('pi-clara-subconscious [--config PATH] init|start|serve|stop|status|pause|resume|list|read ID [OFFSET]|actions|resolve JSON|notifications|ack ID|unregister CLIENT_ID');
+    console.log('pi-subconscious [--config PATH] init|start|serve|stop|status|pause|resume|list|read ID [OFFSET]|actions|resolve JSON|notifications|ack ID|unregister CLIENT_ID');
     return;
   }
   if (command === 'init') {
