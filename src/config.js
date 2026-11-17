@@ -85,8 +85,10 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
 }
 
 export function allowedTool(config, name, definitions = []) {
+  if (config.toolPolicy && !config.toolPolicy(name)) return false;
+  if (name === 'tool_search' && config.sessionFactoryModule && config.toolPolicy) return true;
   if (FORBIDDEN_TOOLS.has(name) && !guardedMutation(config, name)) return false;
-  if (![...INTERNAL_TOOLS, ...config.allowedTools].includes(name)) return false;
+  if (!config.toolPolicy && ![...INTERNAL_TOOLS, ...config.allowedTools].includes(name)) return false;
   // General wrappers can reach unapproved services without emitting nested calls.
   const tool = definitions.find(t => t.name === name);
   return !tool?.reachesTools;

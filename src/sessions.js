@@ -148,7 +148,7 @@ export class PiSessions {
     const privateExtension = { name: 'pi-subconscious-private', factory: createPrivateExtension(this.runtime, row) };
     let result;
     if (config.sessionFactoryModule) {
-      result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, tools: [...config.allowedTools, ...INTERNAL_TOOLS] }, { privateExtension });
+      result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, tools: [...config.allowedTools, ...INTERNAL_TOOLS], privateConfig:config }, { privateExtension });
     } else {
       const settingsManager = privateSettings(cwd, config.agentDir);
       const resourceLoader = new DefaultResourceLoader({
@@ -162,7 +162,7 @@ export class PiSessions {
     if (result.extensionsResult?.errors?.some(error => error.path?.includes('pi-subconscious-private'))) {
       session.dispose(); throw new Error('Private tool enforcement failed to load');
     }
-    await this.selectModel(session, cwd);
+    if (!config.sessionFactoryModule) await this.selectModel(session, cwd);
     session.agent.toolExecution = 'sequential';
     session.agent.streamFunction = gateStream(session.agent.streamFunction, this.runtime.gate, row.id, this.runtime.signal, observation => this.observations.set(row.id, observation));
     // The public Agent boundary hook ends one native Pi turn (assistant + tool
@@ -230,7 +230,7 @@ export class PiSessions {
     const session = await this.open(row);
     const config = this.runtime.config, cwd = config.profileRoot ? config.workspace : row.source?.cwd ?? config.workspace;
     applyIdentity(session.sessionManager, row, currentSettings(cwd, config.agentDir).getSettings());
-    await this.selectModel(session, cwd);
+    if (!config.sessionFactoryModule) await this.selectModel(session, cwd);
     const wakeId = this.runtime.store.row(row.id).wakeId;
     await session.sendCustomMessage({ customType: 'pi-clara-subconscious:wake', content: `Continue your private reflection. Original thought:\n${row.content}`, display: false, details: { wakeId } }, { triggerTurn: true });
     syncSession(session.sessionManager);

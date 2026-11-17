@@ -118,6 +118,7 @@ async function worker(input) {
     } };
     const { runtimeFactory } = await import(pathToFileURL(input.factory));
     const config = JSON.parse(await readFile(input.workerConfig, 'utf8'));
+    config.private = true;
     const result = await (await runtimeFactory(config, { privateExtension: extension }))({ sessionManager: manager });
     session = result.session;
     session.agent.toolExecution = 'sequential';
