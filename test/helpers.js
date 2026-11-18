@@ -46,14 +46,14 @@ export function fixture(t, overrides = {}) {
   writeFileSync(join(agentDir, 'models.json'), JSON.stringify({ providers: { synthetic: { api: 'openai-completions', baseUrl: 'http://synthetic.invalid/v1', apiKey: 'synthetic-test-value', models: [model('default'), model('override')] } } }));
   const path = join(workspace, '.pi', 'settings.json');
   const raw = { dataDir: join(workspace, 'subconscious'), initialRestMs: 0, heartbeatMs: 100, staleClientMs: 500, ...overrides };
-  const settings = { defaultProvider: 'synthetic', defaultModel: 'default', cacheWarming: 'off', retry: { enabled: false }, compaction: { enabled: false }, skills: ['!**'], claraSubconscious: raw };
+  const settings = { defaultProvider: 'synthetic', defaultModel: 'default', cacheWarming: 'off', retry: { enabled: false }, compaction: { enabled: false }, skills: ['!**'], subconscious: raw };
   writeFileSync(join(agentDir, 'settings.json'), JSON.stringify(settings));
-  writeFileSync(path, JSON.stringify({ claraSubconscious: raw }));
+  writeFileSync(path, JSON.stringify({ subconscious: raw }));
   const trusted = { agentDir, ...(overrides.sessionFactoryModule ? { sessionFactoryModule: overrides.sessionFactoryModule } : {}) };
   const config = loadConfig(path, trusted);
   const store = new Store(config), now = Date.now();
   store.change(state => { state.conversations['sample-reflection'] = { id: 'sample-reflection', kind: 'reflection', owner: 'agent', title: 'Synthetic reflection', content: 'A synthetic thought.', status: 'active', source: { file: join(workspace, 'source.jsonl'), sessionId: 'synthetic-source', callId: 'synthetic-origin', context: [] }, nextWake: now + (overrides.initialRestMs ?? 0), createdAt: now, updatedAt: now }; });
-  return { root, config, agentDir, workspace, writeConfig: extra => { writeFileSync(path, JSON.stringify({ claraSubconscious: { ...raw, ...extra } })); return loadConfig(path, trusted); } };
+  return { root, config, agentDir, workspace, writeConfig: extra => { writeFileSync(path, JSON.stringify({ subconscious: { ...raw, ...extra } })); return loadConfig(path, trusted); } };
 }
 export function sdkFactory(handler, onSession) {
   return async options => {

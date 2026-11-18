@@ -45,7 +45,7 @@ test('clean tarball installs, contains only public artifacts, and loads through 
     await session.bindExtensions({mode:'rpc'});
     assert.ok(session.getAllTools().some(tool=>tool.name==='subconscious_reflect'));
     await session.prompt('/subconscious status');
-    assert.ok(manager.getEntries().some(entry=>entry.type==='custom_message'&&entry.customType==='pi-clara-subconscious:inspection'));
+    assert.ok(manager.getEntries().some(entry=>entry.type==='custom_message'&&entry.customType==='pi-subconscious:inspection'));
     await session.extensionRunner.emit({type:'session_shutdown',reason:'quit'});
     session.dispose();
     console.log('Clean artifact loaded through Pi package discovery.');

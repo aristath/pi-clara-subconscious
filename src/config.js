@@ -4,25 +4,19 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 
-// Persisted session markers keep their original IDs across package renames.
-export const TASK_MARKER = 'pi-clara-subconscious:task';
+export const TASK_MARKER = 'pi-subconscious:task';
 
 export const INTERNAL_TOOLS = [
   'subconscious_source',
   'subconscious_return', 'subconscious_finish', 'subconscious_start_chat',
   'subconscious_chats',
 ];
-export const DEFAULT_TOOLS = [
-  'read', 'ls', 'find', 'grep', 'type_configuration', 'prepare_memory',
-  'search_memory', 'read_memory', 'memory_timeline', 'compose_story',
-  'save_memory', 'save_entity', 'save_topic', 'save_story',
-  'presence_read', 'presence_write',
-];
+export const DEFAULT_TOOLS = ['read', 'ls', 'find', 'grep'];
 export const FORBIDDEN_TOOLS = new Set([
   'bash', 'powershell', 'shell', 'exec', 'edit', 'write',
   'exec_command', 'run_command', 'run_shell', 'terminal', 'apply_patch',
   'write_file', 'edit_file', 'execute_code', 'run_code',
-  'codemode', 'tool_search', 'subagent', 'spawn_agent', 'spawn_clara_agent',
+  'codemode', 'tool_search', 'subagent', 'spawn_agent',
 ]);
 const guardedMutation = (config, name) => config.profileRoot && config.sessionFactoryModule && ['write', 'edit'].includes(name);
 export function expandPath(path, base = process.cwd()) {
@@ -50,7 +44,7 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
   const base = dirname(dirname(path));
   const agentDir = expandPath(overrides.agentDir ?? getAgentDir(), base);
   const merged = SettingsManager.create(base, agentDir, { projectTrusted: true }).getSettings();
-  const raw = { ...merged.claraSubconscious, ...input.claraSubconscious, ...overrides };
+  const raw = { ...merged.subconscious, ...input.subconscious, ...overrides };
   let dataDir = expandPath(raw.dataDir ?? './subconscious', base);
   // Existing symlink aliases must share a coordinator.
   if (existsSync(dataDir)) dataDir = realpathSync(dataDir);

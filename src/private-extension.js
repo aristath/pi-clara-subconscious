@@ -5,8 +5,8 @@ import { invocationKey } from './invocations.js';
 const str = () => Type.String({ minLength: 1 });
 const optional = () => Type.Optional(str());
 export function toolResult(value) { return { content: [{ type: 'text', text: JSON.stringify(value) }], details: value }; }
-export const PRIVATE_MARKER = 'pi-clara-subconscious:private';
-export const RETURN_TYPE = 'pi-clara-subconscious:reflection';
+export const PRIVATE_MARKER = 'pi-subconscious:private';
+export const RETURN_TYPE = 'pi-subconscious:reflection';
 
 export function createPrivateExtension(runtime, conversation) {
   return pi => {
@@ -38,11 +38,11 @@ export function createPrivateExtension(runtime, conversation) {
       const unavailable = config.allowedTools.filter(name => !pi.getAllTools().some(tool => tool.name === name));
       runtime.missingTools.set(row.id, unavailable);
       return { message: {
-        customType: 'pi-clara-subconscious:instructions', display: false,
+        customType: 'pi-subconscious:instructions', display: false,
         content: [
-          'This is your private thinking, not a message from a user. Keep your normal SOUL and identity. You may explore without producing a useful conclusion or a report.',
+          'This is your private thinking, not a message from a user. Keep your existing identity. You may explore without producing a useful conclusion or a report.',
           'Follow the thought in this private conversation until you decide it is finished. Use subconscious_return for a selected contribution, or subconscious_finish to end silently.',
-          'Only explicitly available tools can act. Shell commands, general file changes, tool wrappers, and delegation are unavailable. Songya saves are optional and separate from returning a reflection. Starting a user-facing chat is an explicit separate action.',
+          'Use only the tools available in this private session. Starting a user-facing chat is a separate, explicit action.',
           `Original thought: ${row.content}`,
           unavailable.length ? `Configured integrations currently unavailable: ${unavailable.join(', ')}. Continue with the tools that are available; do not claim unavailable actions occurred.` : '',
         ].filter(Boolean).join('\n\n'),

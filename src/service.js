@@ -72,8 +72,8 @@ export class Coordinator {
     }
     const saved = store.state.chatPlans[key];
     assertProfilePath(config, manager.getSessionFile());
-    if (!manager.getEntries().some(entry => entry.type === 'custom' && entry.customType === 'pi-clara-subconscious:opening' && entry.data?.receipt === key)) {
-      manager.appendCustomEntry('pi-clara-subconscious:opening', { receipt: key });
+    if (!manager.getEntries().some(entry => entry.type === 'custom' && entry.customType === 'pi-subconscious:opening' && entry.data?.receipt === key)) {
+      manager.appendCustomEntry('pi-subconscious:opening', { receipt: key });
       manager.appendSessionInfo(saved.title);
       manager.appendMessage(assistantMessage(saved.message, saved.model));
       const settings = SettingsManager.create(config.workspace, config.agentDir);
@@ -90,7 +90,7 @@ export class Coordinator {
   chats(args) { return this.sessions.chats(args); }
   foreground(params) {
     if (typeof params.id !== 'string' || typeof params.sessionId !== 'string' || typeof params.file !== 'string') throw new Error('A foreground session registration is required');
-    const data = { pid: params.pid, busy: params.busy === true, file: params.file, sessionId: params.sessionId, identityEntries: params.identityEntries ?? [] };
+    const data = { pid: params.pid, busy: params.busy === true, file: params.file, sessionId: params.sessionId };
     this.gate.update(params.id, data);
     return data;
   }

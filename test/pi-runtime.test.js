@@ -6,7 +6,7 @@ import { Type } from 'typebox';
 import { createAgentSession, SessionManager, ProjectTrustStore } from '@earendil-works/pi-coding-agent';
 import { Coordinator } from '../src/service.js';
 import { Store } from '../src/store.js';
-import { originContext, identityEntries } from '../src/sessions.js';
+import { originContext } from '../src/sessions.js';
 import { PRIVATE_MARKER } from '../src/private-extension.js';
 import { fixture, sdkFactory, fakeStream, deferred, output, call } from './helpers.js';
 
@@ -73,8 +73,8 @@ test('inspection retains synthetic image content in native Pi tool results', asy
   assert.equal(image.mimeType, 'image/png'); assert.equal(image.data, pixel);
 });
 
-test('normal configured packages supply identity, memories, web, media and Presence without exposing shell/edit tools', async t => {
-  const f = fixture(t, { allowedTools: ['save_memory', 'search_memory', 'web_search', 'generate_image', 'presence_write'] });
+test('configured extensions supply their own instructions and tools without exposing shell or edit tools', async t => {
+  const f = fixture(t, { allowedTools: ['synthetic_save', 'synthetic_search', 'web_search', 'generate_image', 'synthetic_record'] });
   const addon = join(f.root, 'synthetic-addon'); mkdirSync(addon);
   const record = join(f.root, 'effects.jsonl');
   writeFileSync(join(addon, 'package.json'), JSON.stringify({ name: 'synthetic-addon', type: 'module', pi: { extensions: ['./index.js'] } }));
@@ -82,8 +82,8 @@ test('normal configured packages supply identity, memories, web, media and Prese
     import { appendFileSync } from 'node:fs';
     import { Type } from 'typebox';
     export default function(pi) {
-      pi.on('before_agent_start', () => ({systemPrompt: 'Synthetic shared SOUL identity.'}));
-      for (const name of ['save_memory', 'search_memory', 'web_search', 'generate_image', 'presence_write']) pi.registerTool({name, label: name, description: 'Synthetic integration fixture', parameters: Type.Object({}), execute: async () => {
+      pi.on('before_agent_start', () => ({systemPrompt: 'Synthetic extension instructions.'}));
+      for (const name of ['synthetic_save', 'synthetic_search', 'web_search', 'generate_image', 'synthetic_record']) pi.registerTool({name, label: name, description: 'Synthetic integration fixture', parameters: Type.Object({}), execute: async () => {
         appendFileSync(${JSON.stringify(record)}, JSON.stringify({name})+'\\n');
         return {content: [{type: 'text', text: 'Synthetic integration completed.'}]};
       }});
@@ -95,12 +95,12 @@ test('normal configured packages supply identity, memories, web, media and Prese
     prompt = context.messages.filter(message => message.role === 'system').map(message => message.content).join('\n');
     assert.equal(session.getActiveToolNames().includes('bash'), false);
     assert.equal(session.getActiveToolNames().includes('write'), false);
-    return output(['save_memory', 'search_memory', 'web_search', 'generate_image', 'presence_write'].map((name, index) => call(name, {}, `integration-${index}`)));
+    return output(['synthetic_save', 'synthetic_search', 'web_search', 'generate_image', 'synthetic_record'].map((name, index) => call(name, {}, `integration-${index}`)));
   }) });
   t.after(() => coordinator.stop());
   await coordinator.tick();
-  assert.match(prompt, /Synthetic shared SOUL identity/);
-  assert.deepEqual(readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line).name), ['save_memory', 'search_memory', 'web_search', 'generate_image', 'presence_write']);
+  assert.match(prompt, /Synthetic extension instructions/);
+  assert.deepEqual(readFileSync(record, 'utf8').trim().split('\n').map(line => JSON.parse(line).name), ['synthetic_save', 'synthetic_search', 'web_search', 'generate_image', 'synthetic_record']);
   assert.equal(coordinator.missingTools.get('sample-reflection').length, 0);
 });
 
@@ -273,11 +273,11 @@ test('known completed tool results are recovered; unknown side effects are isola
   const manager = SessionManager.create(f.workspace, join(f.config.dataDir, 'sessions'));
   manager.appendCustomEntry(PRIVATE_MARKER, { conversationId: row.id });
   manager.appendMessage({ role: 'user', content: [{ type: 'text', text: 'Synthetic wake' }], timestamp: Date.now() });
-  const assistantId = manager.appendMessage({ ...output([call('save_memory', {}, 'known'), call('generate_image', {}, 'unknown')]) });
+  const assistantId = manager.appendMessage({ ...output([call('synthetic_save', {}, 'known'), call('generate_image', {}, 'unknown')]) });
   const known = `${manager.getSessionId()}:${assistantId}:known`, unknown = `${manager.getSessionId()}:${assistantId}:unknown`;
   coordinator.store.change(state => {
     coordinator.store.row(row.id).sessionFile = manager.getSessionFile();
-    state.actions[known] = { status: 'completed', conversationId: row.id, name: 'save_memory', callId: 'known', result: { role: 'toolResult', toolCallId: 'known', toolName: 'save_memory', content: [{ type: 'text', text: 'Saved exactly once.' }], isError: false, timestamp: Date.now() } };
+    state.actions[known] = { status: 'completed', conversationId: row.id, name: 'synthetic_save', callId: 'known', result: { role: 'toolResult', toolCallId: 'known', toolName: 'synthetic_save', content: [{ type: 'text', text: 'Saved exactly once.' }], isError: false, timestamp: Date.now() } };
     state.actions[unknown] = { status: 'started', conversationId: row.id, name: 'generate_image', callId: 'unknown', args: {}, sessionId: manager.getSessionId() };
   });
   coordinator.sessions.recover();
@@ -315,12 +315,12 @@ test('a persisted Pi result automatically settles a previously unknown tool outc
   const manager = SessionManager.create(f.workspace, join(f.config.dataDir, 'sessions'));
   manager.appendCustomEntry(PRIVATE_MARKER, { conversationId: row.id });
   manager.appendMessage({ role: 'user', content: [{ type: 'text', text: 'Synthetic wake' }], timestamp: Date.now() });
-  const entry = manager.appendMessage(output([call('save_memory', {}, 'receipt-call')]));
+  const entry = manager.appendMessage(output([call('synthetic_save', {}, 'receipt-call')]));
   const key = `${manager.getSessionId()}:${entry}:receipt-call`;
-  manager.appendMessage({ role: 'toolResult', toolCallId: 'receipt-call', toolName: 'save_memory', content: [{ type: 'text', text: 'Observed committed result.' }], isError: false, timestamp: Date.now() });
+  manager.appendMessage({ role: 'toolResult', toolCallId: 'receipt-call', toolName: 'synthetic_save', content: [{ type: 'text', text: 'Observed committed result.' }], isError: false, timestamp: Date.now() });
   store.change(state => {
     Object.assign(store.row(row.id), { sessionFile: manager.getSessionFile(), blocked: 'Unknown outcome', blockedAction: key });
-    state.actions[key] = { status: 'started', conversationId: row.id, name: 'save_memory', callId: 'receipt-call' };
+    state.actions[key] = { status: 'started', conversationId: row.id, name: 'synthetic_save', callId: 'receipt-call' };
   });
   const coordinator = new Coordinator(f.config);
   t.after(() => coordinator.stop());
@@ -336,38 +336,4 @@ test('a missing optional integration is reported while independent thinking rema
   await coordinator.tick();
   assert.deepEqual(coordinator.missingTools.get('sample-reflection'), ['missing_optional_tool']);
   assert.equal(coordinator.store.row('sample-reflection').error, undefined);
-});
-
-test('modular identity inheritance resets foreground flags and preserves private flags on later steps', async t => {
-  const f = fixture(t);
-  const path = join(f.agentDir, 'settings.json'), settings = JSON.parse(readFileSync(path, 'utf8'));
-  writeFileSync(path, JSON.stringify({ ...settings, modularSoul: { defaultSoul: 'fictional-default', souls: {} } }));
-  let turns = 0;
-  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ session }) => {
-    turns++;
-    const current = identityEntries(session.sessionManager.getBranch()).at(-1);
-    assert.equal(current.customType, 'pi-modular-soul:selection');
-    assert.equal(current.data.soul, 'fictional-user');
-    assert.deepEqual(current.data.modules, turns === 1 ? [] : ['private-notes']);
-    if (turns === 1) session.sessionManager.appendCustomEntry('pi-modular-soul:selection', { version: 1, soul: 'fictional-user', modules: ['private-notes'] });
-    return output([call('subconscious_chats', { action: 'list' })]);
-  }) });
-  t.after(() => coordinator.stop());
-  coordinator.store.change(() => { coordinator.store.row('sample-reflection').source = { identityEntries: [{ customType: 'pi-modular-soul:selection', data: { version: 1, soul: 'fictional-user', modules: ['foreground-only'] } }] }; });
-  await coordinator.tick(); await coordinator.tick();
-  assert.equal(turns, 2);
-  const manager = SessionManager.open(coordinator.store.row('sample-reflection').sessionFile);
-  assert.deepEqual(identityEntries(manager.getBranch()).at(-1).data.modules, ['private-notes']);
-});
-
-test('modular configuration autoloads private defaults', async t => {
-  const f = fixture(t);
-  const path = join(f.agentDir, 'settings.json'), settings = JSON.parse(readFileSync(path, 'utf8'));
-  writeFileSync(path, JSON.stringify({ ...settings, modularSoul: { defaultSoul: 'fictional-current', souls: {} } }));
-  const coordinator = new Coordinator(f.config, { createSession: sdkFactory(({ session }) => {
-    const entries = identityEntries(session.sessionManager.getBranch());
-    assert.deepEqual(entries.at(-1).data, { version: 1, soul: 'fictional-current', modules: [] });
-    return output([call('subconscious_chats', { action: 'list' })]);
-  }) });
-  t.after(() => coordinator.stop()); await coordinator.tick();
 });

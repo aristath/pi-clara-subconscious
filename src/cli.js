@@ -23,8 +23,8 @@ export async function main(argv = process.argv.slice(2)) {
   }
   if (command === 'init') {
     const document = readable(config.configPath) ? JSON.parse(readFileSync(config.configPath, 'utf8')) : {};
-    if (document.claraSubconscious) throw new Error('claraSubconscious is already configured in Pi settings');
-    document.claraSubconscious = { dataDir: './subconscious', initiallyPaused: true, model: null, allowedTools: config.allowedTools };
+    if (document.subconscious) throw new Error('subconscious is already configured in Pi settings');
+    document.subconscious = { dataDir: './subconscious', initiallyPaused: true, model: null, allowedTools: config.allowedTools };
     durableWrite(config.configPath, JSON.stringify(document, null, 2) + '\n');
     console.log(`Created ${config.configPath}`); return;
   }

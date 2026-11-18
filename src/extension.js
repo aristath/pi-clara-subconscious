@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { Type } from 'typebox';
 import { Client } from './client.js';
 import { loadConfig, TASK_MARKER } from './config.js';
-import { identityEntries, deliveredIds } from './sessions.js';
+import { deliveredIds } from './sessions.js';
 import { toolResult, PRIVATE_MARKER, RETURN_TYPE } from './private-extension.js';
 
 export function createExtension(deps = {}) {
@@ -14,7 +14,7 @@ return function subconsciousExtension(pi) {
     if (message !== lastWarning) ctx?.ui.notify(`Subconscious: ${message}`, 'warning');
     lastWarning = message;
   };
-  const registration = (context = ctx, busy = running) => ({ id: clientId, pid: process.pid, busy, file: context.sessionManager.getSessionFile() ?? '', sessionId: context.sessionManager.getSessionId(), identityEntries: identityEntries(context.sessionManager.getBranch()) });
+  const registration = (context = ctx, busy = running) => ({ id: clientId, pid: process.pid, busy, file: context.sessionManager.getSessionFile() ?? '', sessionId: context.sessionManager.getSessionId() });
   async function update(busy = running) {
     if (disabled || !client || !ctx) return;
     await client.call('foreground.update', registration(ctx, busy));
@@ -40,7 +40,7 @@ return function subconsciousExtension(pi) {
     disabled = context.sessionManager.getEntries().some(entry => entry.type === 'custom' && [PRIVATE_MARKER, TASK_MARKER].includes(entry.customType));
     if (disabled) return;
     ctx = context; clientId = randomUUID(); running = !context.isIdle();
-    client = new Client(loadConfig(pi.getSettings().claraSubconscious?.configPath ?? join(context.cwd, '.pi/settings.json'), { agentDir: deps.agentDir ?? pi.getSettings().claraSubconscious?.agentDir, sessionFactoryModule: deps.sessionFactoryModule ?? pi.getSettings().claraSubconscious?.sessionFactoryModule }));
+    client = new Client(loadConfig(pi.getSettings().subconscious?.configPath ?? join(context.cwd, '.pi/settings.json'), { agentDir: deps.agentDir ?? pi.getSettings().subconscious?.agentDir, sessionFactoryModule: deps.sessionFactoryModule ?? pi.getSettings().subconscious?.sessionFactoryModule }));
     try { await client.ensure(); await update(); } catch (error) { warn(error); }
     timer = setInterval(() => {
       // Also clears an input claim handled by another extension without a run.
@@ -118,7 +118,7 @@ return function subconsciousExtension(pi) {
       else if (command === 'resolve') result = await client.call(command, JSON.parse(value));
       else if (['status', 'list', 'actions', 'notifications'].includes(command)) result = await client.call(command);
       else throw new Error('Use status, pause, resume, list, read <id>, actions, resolve <JSON>, or notifications');
-      pi.sendMessage({ customType: 'pi-clara-subconscious:inspection', content: JSON.stringify(result, null, 2), display: true }, { triggerTurn: false });
+      pi.sendMessage({ customType: 'pi-subconscious:inspection', content: JSON.stringify(result, null, 2), display: true }, { triggerTurn: false });
     },
   });
 }

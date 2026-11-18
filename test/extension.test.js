@@ -79,7 +79,7 @@ test('Pi-native commands inspect and pause without adding a user message or call
   await session.prompt('/subconscious pause');
   assert.equal(service.coordinator.store.state.paused, true);
   await session.prompt('/subconscious list');
-  const inspections = session.sessionManager.getEntries().filter(entry => entry.type === 'custom_message' && entry.customType === 'pi-clara-subconscious:inspection');
+  const inspections = session.sessionManager.getEntries().filter(entry => entry.type === 'custom_message' && entry.customType === 'pi-subconscious:inspection');
   assert.equal(inspections.length, 2);
   assert.equal(inspections.every(entry => entry.display), true);
   assert.equal(requests, 0);

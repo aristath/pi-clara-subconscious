@@ -1,6 +1,6 @@
 ---
 name: scheduled-tasks
-description: Create, edit, or remove Clara scheduled tasks. Tasks are JS or TS files in the current user's tasks/ directory and can run code or a native Pi inference session.
+description: Create, edit, or remove scheduled Pi tasks. Tasks are JS or TS files in the current user's tasks/ directory and can run code or a native Pi inference session.
 ---
 
 # Scheduled tasks
@@ -41,8 +41,8 @@ export default 'Carry out the work described in this task.';
 ```
 
 `@start_time HH:mm` makes the task eligible once per local day from that time,
-using Clara's configured `messageTime.timeZone` (or the host timezone when
-embedding the scheduler without one). There is no closing time: a delayed task
+using the scheduler's `timeZone` supplied by its host (or the system timezone
+when none is supplied). There is no closing time: a delayed task
 runs when it can. Missed days do not accumulate duplicate runs.
 
 `@quiet_window` requires a fixed duration such as `10m` or `30 minutes` without
@@ -70,8 +70,7 @@ body execute only when the task is picked up.
  * @mode inference
  * @session continue
  */
-export default `Continue the work described in this task's notebook.
-Use the existing notebook and scratchpad tools when useful.`;
+export default 'Continue the work described in this task.';
 ```
 
 An inference task exports either a prompt string or an async function returning
@@ -81,7 +80,7 @@ task, so it can gather deterministic input before forming the prompt.
 `@session fresh` starts a new conversation each run and is the default.
 `@session continue` reopens this task's previous conversation. Each task has its
 own conversation; it does not reuse a frontend chat. Native Pi loads the owner's
-settings, SOUL, model, and permitted tools. The prompt is passed as a task custom
+settings, extensions, model, and permitted tools. The prompt is passed as a task custom
 message; the scheduler does not add an agenda or require a particular result.
 
 ### Task-specific settings
@@ -95,27 +94,22 @@ An inference task can also export a `settings` object with ordinary Pi settings:
  * @session fresh
  */
 export const settings = {
-  modularSoul: {
-    defaultSoul: 'task',
-    souls: { task: './TASK_SOUL.md' },
-  },
-  songya: [
-    { user: 'agent', store: './agent-memory', recallEnabled: false },
-  ],
+  defaultThinkingLevel: 'high',
+  defaultTools: ['read', 'ls'],
 };
-export default 'Process the material described in your task SOUL.';
+export default 'Read the project notes and consider the next steps.';
 ```
 
 The host merges these overrides into the owner's settings using Pi's normal
 rules before loading extensions. Relative paths still use the owner's profile
-directory. The selected SOUL file must exist; this example does not create one.
+directory.
 Overrides and settings changes made by that session stay in memory, including
 across a resource reload. The user's settings files are not rewritten.
-Household model and permission controls still apply.
+The host application’s model and permission controls still apply.
 
 Omitting `settings` keeps the usual profile configuration. Settings are read
-again on the next run. A continued conversation retains its existing SOUL
-selection; use `@session fresh` to start with a different default selection.
+again on the next run. A continued conversation retains its session state;
+use `@session fresh` to start a new conversation.
 
 For example, a less frequent task can use:
 
@@ -125,7 +119,7 @@ For example, a less frequent task can use:
  * @mode inference
  * @session fresh
  */
-export default 'Read the notebook named in this task and reconsider its open questions.';
+export default 'Review the project notes and reconsider any open questions.';
 ```
 
 These are examples of file structure, not tasks to install automatically.

@@ -25,7 +25,6 @@ export function sessionReference(manager) {
   return { file: realpathSync(manager.getSessionFile()), sessionId: manager.getSessionId() };
 }
 export function originContext(manager, callId) {
-  const branch = manager.getBranch();
   const projection = manager.buildSessionProjection().entries;
   const index = projection.findLastIndex(entry => entry.messages.some(message => message.role === 'assistant' && message.content.some(part => part.type === 'toolCall' && part.id === callId && part.name === 'subconscious_reflect')));
   if (index < 0) throw new Error('The originating Pi tool invocation is unavailable');
@@ -33,7 +32,7 @@ export function originContext(manager, callId) {
   const message = entry.messages.find(message => message.role === 'assistant' && message.content.some(part => part.type === 'toolCall' && part.id === callId));
   const call = message.content.find(part => part.type === 'toolCall' && part.id === callId);
   const preceding = projection.slice(0, index).flatMap(entry => entry.messages).filter(message => message.role !== 'system').slice(-2);
-  return { ...sessionReference(manager), callId, entryId: entry.sourceEntry.id, cwd: manager.getCwd(), context: [...preceding, message], thought: call.arguments.content, identityEntries: identityEntries(branch) };
+  return { ...sessionReference(manager), callId, entryId: entry.sourceEntry.id, cwd: manager.getCwd(), context: [...preceding, message], thought: call.arguments.content };
 }
 export function originPresent(manager, source) {
   // Compaction changes model context, not the existence of an originating
@@ -44,28 +43,6 @@ export function originPresent(manager, source) {
   const edit = branch.findLast(entry => entry.type === 'context_edit' && entry.targetId === source.entryId);
   const content = edit ? edit.replacement?.content : entry.message.content;
   return Array.isArray(content) && content.some(part => part.type === 'toolCall' && part.id === source.callId && part.name === 'subconscious_reflect' && part.arguments.content === source.thought);
-}
-export function identityEntries(branch) {
-  const selected = branch.findLast(entry => entry.type === 'custom' && entry.customType === 'pi-modular-soul:selection')
-    ?? branch.findLast(entry => entry.type === 'custom' && entry.customType === 'pi-souls:selection');
-  return selected ? [{ customType: selected.customType, data: structuredClone(selected.data) }] : [];
-}
-function applyIdentity(manager, row, settings) {
-  const identity = row.source?.identityEntries?.at(-1);
-  if (settings.modularSoul || identity?.customType === 'pi-modular-soul:selection') {
-    const current = manager.getBranch().findLast(entry => entry.type === 'custom' && entry.customType === 'pi-modular-soul:selection')?.data;
-    const soul = identity?.customType === 'pi-modular-soul:selection' ? identity.data?.soul
-      : identity?.data?.name && Object.hasOwn(settings.modularSoul?.souls ?? {}, identity.data.name) ? identity.data.name
-        : current?.soul ?? settings.modularSoul?.defaultSoul;
-    // A new private conversation inherits the identity, not foreground flags.
-    // Once bound, preserve this conversation's own optional selections each turn.
-    if (typeof soul === 'string' && current?.soul !== soul) manager.appendCustomEntry('pi-modular-soul:selection', { version: 1, soul, modules: [] });
-    return;
-  }
-  const source = identity?.data;
-  const soul = settings.modelSouls?.[`${settings.defaultProvider}/${settings.defaultModel}`] ?? settings.defaultSoul;
-  const selection = source ?? (typeof soul === 'string' ? { version: 1, name: soul } : settings.modelSouls || identityEntries(manager.getBranch()).length ? { version: 1, name: null, disabled: true } : undefined);
-  if (selection && JSON.stringify(identityEntries(manager.getBranch()).at(-1)?.data) !== JSON.stringify(selection)) manager.appendCustomEntry('pi-souls:selection', selection);
 }
 export function deliveredIds(manager) {
   return new Set(manager.getBranch().filter(entry => entry.type === 'custom_message' && entry.customType === RETURN_TYPE).flatMap(entry => entry.details?.deliveryIds ?? []));
@@ -139,8 +116,6 @@ export class PiSessions {
       manager = row.sessionFile ? SessionManager.open(row.sessionFile) : SessionManager.create(cwd, join(config.dataDir, 'sessions'));
       manager.appendCustomEntry(PRIVATE_MARKER, { version: 1, storeId: config.storeId, conversationId: row.id, kind: row.kind });
       manager.appendSessionInfo(row.title);
-      const settings = currentSettings(cwd, config.agentDir).getSettings();
-      applyIdentity(manager, row, settings);
       store.change(() => { Object.assign(store.row(row.id), { sessionFile: manager.getSessionFile(), sessionId: manager.getSessionId() }); });
     }
     this.recoverTools(row, manager);
@@ -148,7 +123,7 @@ export class PiSessions {
     const privateExtension = { name: 'pi-subconscious-private', factory: createPrivateExtension(this.runtime, row) };
     let result;
     if (config.sessionFactoryModule) {
-      result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, tools: [...config.allowedTools, ...INTERNAL_TOOLS], privateConfig:config }, { privateExtension });
+      result = await this.createSession({ cwd, agentDir: config.agentDir, sessionManager: manager, tools: [...config.allowedTools, ...INTERNAL_TOOLS], privateConfig:config, source: row.source }, { privateExtension });
     } else {
       const settingsManager = privateSettings(cwd, config.agentDir);
       const resourceLoader = new DefaultResourceLoader({
@@ -229,10 +204,9 @@ export class PiSessions {
   async step(row) {
     const session = await this.open(row);
     const config = this.runtime.config, cwd = config.profileRoot ? config.workspace : row.source?.cwd ?? config.workspace;
-    applyIdentity(session.sessionManager, row, currentSettings(cwd, config.agentDir).getSettings());
     if (!config.sessionFactoryModule) await this.selectModel(session, cwd);
     const wakeId = this.runtime.store.row(row.id).wakeId;
-    await session.sendCustomMessage({ customType: 'pi-clara-subconscious:wake', content: `Continue your private reflection. Original thought:\n${row.content}`, display: false, details: { wakeId } }, { triggerTurn: true });
+    await session.sendCustomMessage({ customType: 'pi-subconscious:wake', content: `Continue your private reflection. Original thought:\n${row.content}`, display: false, details: { wakeId } }, { triggerTurn: true });
     syncSession(session.sessionManager);
     const last = session.messages.findLast(message => message.role === 'assistant');
     if (last?.stopReason === 'error' || last?.stopReason === 'aborted') throw new Error(last.errorMessage ?? 'Private generation failed');
@@ -258,7 +232,7 @@ export class PiSessions {
         this.recoverTools(row, manager);
         if (!row.inProgress || row.stepCompleted || this.runtime.store.row(row.id).blocked) continue;
         const branch = manager.getBranch();
-        const wake = branch.findLastIndex(entry => entry.type === 'custom_message' && entry.customType === 'pi-clara-subconscious:wake' && entry.details?.wakeId === row.wakeId);
+        const wake = branch.findLastIndex(entry => entry.type === 'custom_message' && entry.customType === 'pi-subconscious:wake' && entry.details?.wakeId === row.wakeId);
         const assistant = branch.slice(wake + 1).findLast(entry => entry.type === 'message' && entry.message.role === 'assistant');
         if (wake >= 0 && assistant && !['error', 'aborted'].includes(assistant.message.stopReason)) {
           this.runtime.store.change(() => { this.runtime.store.row(row.id).stepCompleted = { wakeId: row.wakeId, hasTools: assistant.message.content.some(part => part.type === 'toolCall'), completedAt: Date.parse(assistant.timestamp) }; });

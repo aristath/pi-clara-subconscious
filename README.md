@@ -1,11 +1,11 @@
 # pi-subconscious
 
-Clara’s scheduled tasks and chat-triggered private reflections, using native Pi
-sessions and the user’s existing SOUL, settings, model, and tools.
+Scheduled tasks and chat-triggered private reflections using native Pi sessions,
+settings, models, and configured tools.
 
 ## Scheduled tasks
 
-The Clara application owns **one shared scheduler for all users**. It reads
+An embedding application creates a `TaskScheduler`. It reads
 `tasks/*.js` and `tasks/*.ts` inside each user’s profile, runs one due task at a
 time, and gives frontend chats priority between calls. Scheduled tasks do not
 need a separate service or a per-user scheduler.
@@ -18,8 +18,8 @@ when the package is installed. No real tasks are supplied or installed.
 Optional `@start_time HH:mm` schedules one daily run instead of an interval.
 Optional `@quiet_window 30m` waits for foreground inactivity before starting,
 with no cutoff time. Neither field has a default or affects tasks that omit it.
-The task editor exposes both fields, and the scheduler uses Clara's configured
-message timezone. See the authoring guide for examples.
+The host supplies the scheduler's `timeZone`; otherwise it uses the system
+timezone. See the authoring guide for examples.
 
 A minimal deterministic task:
 
@@ -46,7 +46,7 @@ export default 'Continue the work described in this task’s notebook.';
 ```
 
 Inference tasks may export `settings` to override Pi and extension configuration
-for that task's session, including its SOUL and accessible Songya stores. The
+for that task's session. The
 host applies Pi's normal merge rules and keeps those settings in memory; the
 profile's settings files stay unchanged. See the authoring guide for an example.
 
@@ -69,16 +69,16 @@ npm install
 pi install .
 ```
 
-Clara’s deployment uses this editable Git checkout. Private task files, user
-configuration, credentials, state, and generated files belong outside the repo.
+Private task files, configuration, credentials, state, and generated files belong
+outside the package repository.
 
 ## Chat-triggered reflections
 
-The existing per-user coordinator continues to handle thoughts set aside from a
+The coordinator handles thoughts set aside from a
 frontend chat with `subconscious_reflect`. Reflections keep their exact source
 conversation and can return selected context there with `subconscious_return`,
 or end silently with `subconscious_finish`. They do not automatically prompt the
-frontend. The coordinator no longer wakes an empty general conversation on a timer.
+frontend.
 
 Private reflection tools also include `subconscious_source`,
 `subconscious_start_chat`, and `subconscious_chats`. The existing model/tool gate,
@@ -86,11 +86,11 @@ accepted-action recovery, and transcript inspection remain in use for reflection
 
 ### Configuration
 
-Use the `claraSubconscious` section of the profile’s `.pi/settings.json`:
+Use the `subconscious` section of the profile’s `.pi/settings.json`:
 
 ```json
 {
-  "claraSubconscious": {
+  "subconscious": {
     "dataDir": "./subconscious",
     "initiallyPaused": true,
     "model": null
@@ -101,10 +101,12 @@ Use the `claraSubconscious` section of the profile’s `.pi/settings.json`:
 `dataDir` resolves from the profile directory. The native Pi agent directory
 supplies package configuration. `model: null` follows the profile’s default;
 otherwise use `{ "provider": "provider-id", "id": "model-id" }`.
-`allowedTools` contains exact permitted private tool names. General execution and
+`allowedTools` contains exact permitted private tool names. The default is
+`read`, `ls`, `find`, and `grep`; tools from other extensions must be configured
+explicitly. General execution and
 delegation are excluded; a trusted host factory supplies guarded file tools.
 
-The current heartbeat, stale-client, and error-retry options remain available as
+Heartbeat, stale-client, and error-retry options are
 `heartbeatMs` (3000), `staleClientMs` (15000), and `errorRetryMs` (30000).
 
 Run the reflection coordinator from the owner’s profile directory:
