@@ -39,6 +39,11 @@ A continuing inference task:
 export default 'Continue the work described in this task’s notebook.';
 ```
 
+Inference tasks may export `settings` to override Pi and extension configuration
+for that task's session, including its SOUL and accessible Songya stores. The
+host applies Pi's normal merge rules and keeps those settings in memory; the
+profile's settings files stay unchanged. See the authoring guide for an example.
+
 Intervals include calendar months, such as `@every 6 months`. Inference defaults
 to `@session fresh` unless the definition says `continue`.
 

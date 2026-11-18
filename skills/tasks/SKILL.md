@@ -57,6 +57,39 @@ own conversation; it does not reuse a frontend chat. Native Pi loads the owner's
 settings, SOUL, model, and permitted tools. The prompt is passed as a task custom
 message; the scheduler does not add an agenda or require a particular result.
 
+### Task-specific settings
+
+An inference task can also export a `settings` object with ordinary Pi settings:
+
+```js
+/**
+ * @every 1 day
+ * @mode inference
+ * @session fresh
+ */
+export const settings = {
+  modularSoul: {
+    defaultSoul: 'task',
+    souls: { task: './TASK_SOUL.md' },
+  },
+  songya: [
+    { user: 'agent', store: './agent-memory', recallEnabled: false },
+  ],
+};
+export default 'Process the material described in your task SOUL.';
+```
+
+The host merges these overrides into the owner's settings using Pi's normal
+rules before loading extensions. Relative paths still use the owner's profile
+directory. The selected SOUL file must exist; this example does not create one.
+Overrides and settings changes made by that session stay in memory, including
+across a resource reload. The user's settings files are not rewritten.
+Household model and permission controls still apply.
+
+Omitting `settings` keeps the usual profile configuration. Settings are read
+again on the next run. A continued conversation retains its existing SOUL
+selection; use `@session fresh` to start with a different default selection.
+
 For example, a less frequent task can use:
 
 ```js

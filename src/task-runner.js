@@ -80,6 +80,8 @@ async function worker(input) {
       await task.default({ cwd: input.task.folder, user: input.task.user.id, signal: controller.signal });
       return;
     }
+    if (task.settings !== undefined && (!task.settings || typeof task.settings !== 'object' || Array.isArray(task.settings)))
+      throw new Error('Export settings as a Pi settings object.');
     const prompt = typeof task.default === 'function'
       ? await task.default({ cwd: input.task.folder, user: input.task.user.id, signal: controller.signal }) : task.default;
     if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('An inference task must export a prompt string or a function returning one.');
@@ -119,7 +121,7 @@ async function worker(input) {
     const { runtimeFactory } = await import(pathToFileURL(input.factory));
     const config = JSON.parse(await readFile(input.workerConfig, 'utf8'));
     config.private = true;
-    const result = await (await runtimeFactory(config, { privateExtension: extension }))({ sessionManager: manager });
+    const result = await (await runtimeFactory(config, { privateExtension: extension, settingsOverrides: task.settings }))({ sessionManager: manager });
     session = result.session;
     session.agent.toolExecution = 'sequential';
     session.agent.streamFunction = gateStream(session.agent.streamFunction, gate, input.task.name, controller.signal);
