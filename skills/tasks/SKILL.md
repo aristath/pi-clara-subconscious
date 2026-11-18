@@ -6,7 +6,7 @@ description: Create, edit, or remove Clara scheduled tasks. Tasks are JS or TS f
 # Scheduled tasks
 
 Task files belong in `tasks/` under the user's profile working directory.
-Use a descriptive `.js` or `.ts` filename. Start the file with this header:
+Use a descriptive `.js` or `.ts` filename. Start the file with a schedule header:
 
 ```js
 /**
@@ -24,6 +24,33 @@ hours, days, weeks, calendar months, and years, including shorthand such as
 `5m`, `13h`, and `6 months`. A newly discovered file first becomes due after its
 interval. Editing the interval recalculates it from the last start; editing the
 body alone keeps its schedule.
+
+### Daily start and quiet period
+
+These fields are optional and have no defaults. A task without them keeps its
+normal interval behavior. For a daily task, use `@start_time` instead of `@every`:
+
+```js
+/**
+ * @start_time 00:00
+ * @quiet_window 30m
+ * @mode inference
+ * @session fresh
+ */
+export default 'Carry out the work described in this task.';
+```
+
+`@start_time HH:mm` makes the task eligible once per local day from that time,
+using Clara's configured `messageTime.timeZone` (or the host timezone when
+embedding the scheduler without one). There is no closing time: a delayed task
+runs when it can. Missed days do not accumulate duplicate runs.
+
+`@quiet_window` requires a fixed duration such as `10m` or `30 minutes` without
+frontend activity. The timer starts when the last foreground response finishes;
+active chats still take priority. Host startup begins a fresh quiet period.
+This field also works with `@every`, without requiring `@start_time`.
+Other tasks do not reset the quiet timer, and a task waiting for quiet does not
+block eligible tasks. Once started, normal foreground-priority rules apply.
 
 `@mode deterministic` runs the exported function once, with the user's profile
 as its current directory. The arguments are the absolute `cwd`, the username

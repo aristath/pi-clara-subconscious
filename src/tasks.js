@@ -36,25 +36,51 @@ export function nextRun(time, every) {
 
 export function taskHeader(source) {
   const header = source.match(/^\s*\/\*\*?([\s\S]*?)\*\//)?.[1];
-  if (!header) throw new Error('Start the task file with a comment containing @every and @mode.');
-  const fields = Object.fromEntries([...header.matchAll(/^\s*\*?\s*@([a-z]+)\s+([^\r\n]+)/gm)].map(match => [match[1], match[2].trim()]));
-  const every = interval(fields.every);
+  if (!header) throw new Error('Start the task file with a comment containing @every or @start_time, and @mode.');
+  const fields = Object.fromEntries([...header.matchAll(/^\s*\*?\s*@([a-z_]+)\s+([^\r\n]+)/gm)].map(match => [match[1], match[2].trim()]));
+  if (fields.start_time !== undefined && (!/^([01]\d|2[0-3]):[0-5]\d$/.test(fields.start_time) || fields.every !== undefined))
+    throw new Error('Use @start_time HH:mm instead of @every for a daily start.');
+  const schedule = fields.start_time !== undefined ? { start_time: fields.start_time } : { every: interval(fields.every) };
+  if (fields.quiet_window !== undefined) {
+    const quiet = interval(fields.quiet_window);
+    if (!quiet.milliseconds) throw new Error('@quiet_window needs a fixed duration, such as 10m.');
+    schedule.quiet_window = quiet.milliseconds;
+  }
   if (!['deterministic', 'inference'].includes(fields.mode)) throw new Error('@mode must be deterministic or inference.');
   const session = fields.session ?? 'fresh';
   if (!['fresh', 'continue'].includes(session)) throw new Error('@session must be fresh or continue.');
-  return { every, mode: fields.mode, session };
+  return { ...schedule, mode: fields.mode, session };
 }
 
 const inside = (root, path) => { const part = relative(root, path); return part !== '..' && !part.startsWith('../') && !isAbsolute(part); };
 
 // One scheduler belongs to the host application; each profile owns its progress.
 export class TaskScheduler {
-  constructor({ users, prepare, execute, gate = new Gate(), tickMs = 30000, now = Date.now, report = console.error }) {
+  constructor({ users, prepare, execute, now = Date.now, gate = new Gate(undefined, undefined, now), timeZone, tickMs = 30000, report = console.error }) {
     this.users = users; this.prepare = prepare; this.execute = execute; this.gate = gate;
     this.tickMs = tickMs; this.now = now; this.report = report;
     if (!Number.isFinite(tickMs) || tickMs <= 0) throw new Error('tasks.tickMs must be a positive number of milliseconds.');
     this.states = new Map(); this.errors = new Map(); this.running = null; this.stopping = false;
+    this.clock = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
   }
+  dailyStart(time, clock, day = 0) {
+    const parts = at => Object.fromEntries(this.clock.formatToParts(at).filter(p => p.type !== 'literal').map(p => [p.type, Number(p.value)]));
+    const p = parts(time), [hour, minute] = clock.split(':').map(Number);
+    const wall = Date.UTC(p.year, p.month - 1, p.day + day, hour, minute);
+    let stamp = wall;
+    for (let i = 0; i < 3; i++) {
+      const local = parts(stamp);
+      const next = wall - (Date.UTC(local.year, local.month - 1, local.day, local.hour, local.minute, local.second) - Math.floor(stamp / 1000) * 1000);
+      if (next === stamp) break;
+      stamp = next;
+    }
+    return stamp;
+  }
+  latestStart(time, clock) {
+    const today = this.dailyStart(time, clock);
+    return today <= time ? today : this.dailyStart(time, clock, -1);
+  }
+  quiet(task) { return task.quiet_window === undefined || this.now() - this.gate.lastForegroundEnd >= task.quiet_window; }
   state(folder) {
     if (!this.states.has(folder)) {
       const path = join(folder, '.pi/runtime/tasks.json');
@@ -88,12 +114,19 @@ export class TaskScheduler {
             if (!inside(root, path)) throw new Error('Task file points outside its owner’s profile.');
             const header = taskHeader(await readFile(path, 'utf8'));
             let row = state.value.tasks[file.name];
-            if (!row) { row = state.value.tasks[file.name] = { createdAt: this.now(), every: header.every, nextRun: nextRun(this.now(), header.every) }; changed = true; }
-            else if (JSON.stringify(row.every) !== JSON.stringify(header.every)) {
+            if (!row) { row = state.value.tasks[file.name] = { createdAt: this.now() }; changed = true; }
+            if (header.start_time !== undefined) {
+              const due = Math.max(this.latestStart(this.now(), header.start_time), this.dailyStart(row.createdAt, header.start_time));
+              const next = row.lastStarted >= due ? this.dailyStart(due, header.start_time, 1) : due;
+              if (row.nextRun !== next || row.start_time !== header.start_time || row.every !== undefined) {
+                row.nextRun = next; row.start_time = header.start_time; delete row.every; changed = true;
+              }
+            } else if (row.nextRun === undefined || row.start_time !== undefined || JSON.stringify(row.every) !== JSON.stringify(header.every)) {
+              delete row.start_time;
               row.every = header.every; row.nextRun = nextRun(row.lastStarted ?? row.createdAt, header.every); changed = true;
             }
             this.errors.delete(key);
-            if (row.nextRun <= this.now()) pending.push({ ...header, user, folder, name: file.name, path, due: row.nextRun });
+            if (row.nextRun <= this.now() && this.quiet(header)) pending.push({ ...header, user, folder, name: file.name, path, due: row.nextRun });
           } catch (error) { this.error(key, error); }
         }
         // Deleting a task removes only its schedule. Its conversations remain.
@@ -117,10 +150,14 @@ export class TaskScheduler {
     let release;
     try {
       release = await this.gate.privateStep('task', task.user.id+'/'+task.name);
+      if (!this.quiet(task)) return;
       const row = this.state(task.folder).value.tasks[task.name];
       // Record the occurrence before executing user code. A service crash does
       // not replay already-started deterministic effects.
-      row.lastStarted = this.now(); row.nextRun = nextRun(row.lastStarted, task.every);
+      row.lastStarted = this.now();
+      row.nextRun = task.start_time !== undefined
+        ? this.dailyStart(this.latestStart(row.lastStarted, task.start_time), task.start_time, 1)
+        : nextRun(row.lastStarted, task.every);
       this.save(task.folder);
       const context = await this.prepare(task.user);
       if (this.stopping) return;

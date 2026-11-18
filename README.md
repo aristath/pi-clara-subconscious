@@ -15,6 +15,12 @@ file headers, intervals, deterministic code, inference prompts, fresh/continuing
 sessions, editing and removing tasks, and stored progress. Pi discovers this skill
 when the package is installed. No real tasks are supplied or installed.
 
+Optional `@start_time HH:mm` schedules one daily run instead of an interval.
+Optional `@quiet_window 30m` waits for foreground inactivity before starting,
+with no cutoff time. Neither field has a default or affects tasks that omit it.
+The task editor exposes both fields, and the scheduler uses Clara's configured
+message timezone. See the authoring guide for examples.
+
 A minimal deterministic task:
 
 ```js

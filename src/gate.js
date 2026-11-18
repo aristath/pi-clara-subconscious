@@ -1,6 +1,7 @@
 export class Gate {
-  constructor(paused = () => false, isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }) {
+  constructor(paused = () => false, isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }, now = Date.now) {
     this.paused = paused; this.isAlive = isAlive;
+    this.now = now; this.lastForegroundEnd = now();
     this.clients = new Map(); this.waiters = new Set(); this.active = null; this.stopping = false;
   }
   wake() { for (const resolve of this.waiters) resolve(); this.waiters.clear(); }
@@ -15,15 +16,16 @@ export class Gate {
   }
   update(id, data) {
     if (!id || !Number.isInteger(data.pid) || data.pid <= 0) throw new Error('Invalid foreground registration');
+    if (this.clients.get(id)?.busy && data.busy === false) this.lastForegroundEnd = this.now();
     this.clients.set(id, { ...this.clients.get(id), ...data, seen: Date.now() });
     this.wake();
   }
-  remove(id) { this.clients.delete(id); this.wake(); }
+  remove(id) { if (this.clients.get(id)?.busy) this.lastForegroundEnd = this.now(); this.clients.delete(id); this.wake(); }
   sweep(staleMs) {
     for (const [id, client] of this.clients) {
       // A live process with a lost heartbeat may still be generating. Retain its
       // busy claim; inspection/explicit unregister can resolve a stale live host.
-      if (Date.now() - client.seen > staleMs && !this.isAlive(client.pid)) this.clients.delete(id);
+      if (Date.now() - client.seen > staleMs && !this.isAlive(client.pid)) this.remove(id);
     }
     this.wake();
   }

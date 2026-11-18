@@ -15,7 +15,7 @@ async function fixture(t) {
   for (const user of users) await mkdir(join(user.folder,'tasks'),{recursive:true});
   let time = Date.UTC(2026,0,31,10);
   const options = { users:async()=>users, prepare:async user=>({agentDir:join(user.folder,'.pi'),taskLockDir:join(root,'lock')}), now:()=>time, report:()=>{} };
-  return { root, users, options, advance:ms=>{time+=ms;}, task:async(user,name,source)=>writeFile(join(users[user].folder,'tasks',name),source) };
+  return { root, users, options, advance:ms=>{time+=ms;}, setTime:value=>{time=value;}, task:async(user,name,source)=>writeFile(join(users[user].folder,'tasks',name),source) };
 }
 
 test('task headers support both modes, session choices, fixed intervals and calendar months', () => {
@@ -25,6 +25,63 @@ test('task headers support both modes, session choices, fixed intervals and cale
   assert.equal(interval('every 5 minutes').milliseconds,300000);
   assert.throws(()=>taskHeader('/** @every 0h */'),/interval/);
   assert.throws(()=>taskHeader(header('5m','unknown')),/@mode/);
+  assert.deepEqual(taskHeader('/**\n * @start_time 00:00\n * @quiet_window 30m\n * @mode inference\n */'), {start_time:'00:00',quiet_window:1800000,mode:'inference',session:'fresh'});
+  assert.throws(()=>taskHeader('/**\n * @start_time 24:00\n * @mode inference\n */'), /HH:mm/);
+  assert.equal(taskHeader(header()).quiet_window, undefined);
+  assert.deepEqual(taskHeader('/**\n * @start_time 02:00\n * @mode deterministic\n */'), {start_time:'02:00',mode:'deterministic',session:'fresh'});
+  assert.throws(()=>taskHeader(header().replace('@every 5 minutes','@every 5 minutes\n * @quiet_window 1 month')), /fixed duration/);
+});
+
+test('optional daily starts and quiet periods leave ordinary tasks unchanged and persist one run per local night', async t => {
+  const f=await fixture(t), order=[];
+  f.setTime(Date.UTC(2026,0,31,20,30)); // 22:30 in Athens.
+  await f.task(0,'ordinary.js',header());
+  await f.task(0,'quiet.js',header().replace('@every 5 minutes','@every 5 minutes\n * @quiet_window 10m'));
+  await f.task(0,'nightly.js','/**\n * @start_time 23:00\n * @quiet_window 30m\n * @mode inference\n */');
+  let scheduler=new TaskScheduler({...f.options,timeZone:'Europe/Athens',execute:async task=>order.push(task.name)});
+  assert.equal((await scheduler.pending()).length,0);
+  f.advance(300000);
+  assert.equal(await scheduler.tick(),true);
+  assert.deepEqual(order,['ordinary.js']);
+  await unlink(join(f.users[0].folder,'tasks/ordinary.js'));
+  await scheduler.gate.foreground('chat',{pid:process.pid});
+  f.setTime(Date.UTC(2026,1,1,3,45)); // Reply finishes at 05:45, with no cutoff.
+  assert.equal(await scheduler.tick(),false);
+  scheduler.gate.remove('chat');
+  f.advance(600000);
+  assert.equal(await scheduler.tick(),true);
+  assert.deepEqual(order,['ordinary.js','quiet.js']);
+  await unlink(join(f.users[0].folder,'tasks/quiet.js'));
+  assert.equal(await scheduler.tick(),false);
+  f.advance(1200000);
+  assert.equal(await scheduler.tick(),true);
+  assert.equal(await scheduler.tick(),false);
+  await scheduler.close();
+  scheduler=new TaskScheduler({...f.options,timeZone:'Europe/Athens',execute:async task=>order.push(task.name)});
+  assert.equal(await scheduler.tick(),false);
+  f.setTime(Date.UTC(2026,1,1,21,15)); // Next local 23:15, less than 24h since the delayed run.
+  assert.equal(await scheduler.tick(),true);
+  assert.equal(await scheduler.tick(),false);
+  assert.deepEqual(order,['ordinary.js','quiet.js','nightly.js','nightly.js']);
+  assert.equal(scheduler.errors.size,0);
+  await scheduler.close();
+});
+
+test('chat activity during task admission restarts the requested quiet period', async t => {
+  const f=await fixture(t), order=[];
+  await f.task(0,'quiet.js',header().replace('@every 5 minutes','@every 5 minutes\n * @quiet_window 10m'));
+  const scheduler=new TaskScheduler({...f.options,execute:async task=>order.push(task.name)});
+  await scheduler.pending();f.advance(600000);
+  const [task]=await scheduler.pending();
+  await scheduler.gate.foreground('chat',{pid:process.pid});
+  const waiting=scheduler.run(task);
+  f.advance(300000);scheduler.gate.remove('chat');await waiting;
+  assert.deepEqual(order,[]);
+  assert.equal(await scheduler.tick(),false);
+  f.advance(600000);
+  assert.equal(await scheduler.tick(),true);
+  assert.deepEqual(order,['quiet.js']);
+  await scheduler.close();
 });
 
 test('one FIFO queue spans users, survives restart and skips failed or removed tasks', async t => {
