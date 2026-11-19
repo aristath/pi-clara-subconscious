@@ -5,7 +5,7 @@ import { createAgentSession, SessionManager, DefaultResourceLoader } from '@eare
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { loadConfig } from '../src/config.js';
 import { Store } from '../src/store.js';
-import { assistantMessage as nativeAssistantMessage } from '../src/sessions.js';
+import { assistantMessage as nativeAssistantMessage } from '../src/native-operations.js';
 export const syntheticModel = { api: 'synthetic-api', provider: 'synthetic', id: 'default' };
 export const assistantMessage = content => nativeAssistantMessage(content, syntheticModel);
 
@@ -49,20 +49,11 @@ export function fixture(t, overrides = {}) {
   const settings = { defaultProvider: 'synthetic', defaultModel: 'default', cacheWarming: 'off', retry: { enabled: false }, compaction: { enabled: false }, skills: ['!**'], subconscious: raw };
   writeFileSync(join(agentDir, 'settings.json'), JSON.stringify(settings));
   writeFileSync(path, JSON.stringify({ subconscious: raw }));
-  const trusted = { agentDir, ...(overrides.sessionFactoryModule ? { sessionFactoryModule: overrides.sessionFactoryModule } : {}) };
+  const trusted = { agentDir };
   const config = loadConfig(path, trusted);
   const store = new Store(config), now = Date.now();
   store.change(state => { state.conversations['sample-reflection'] = { id: 'sample-reflection', kind: 'reflection', owner: 'agent', title: 'Synthetic reflection', content: 'A synthetic thought.', status: 'active', source: { file: join(workspace, 'source.jsonl'), sessionId: 'synthetic-source', callId: 'synthetic-origin', context: [] }, nextWake: now + (overrides.initialRestMs ?? 0), createdAt: now, updatedAt: now }; });
   return { root, config, agentDir, workspace, writeConfig: extra => { writeFileSync(path, JSON.stringify({ subconscious: { ...raw, ...extra } })); return loadConfig(path, trusted); } };
-}
-export function sdkFactory(handler, onSession) {
-  return async options => {
-    if (options.resourceLoader.getSkills().skills.length) throw new Error('Synthetic fixtures must not load user skills');
-    const result = await createAgentSession(options);
-    result.session.agent.streamFunction = fakeStream(input => handler({ ...input, session: result.session }));
-    onSession?.(result.session);
-    return result;
-  };
 }
 export async function foreground(config, factory, handler = () => output('Synthetic reply.')) {
   const manager = SessionManager.create(config.workspace, join(config.agentDir, 'sessions', 'synthetic-foreground'));

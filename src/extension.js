@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { Type } from 'typebox';
 import { Client } from './client.js';
 import { loadConfig, TASK_MARKER } from './config.js';
-import { deliveredIds } from './sessions.js';
+import { deliveredIds } from './native-operations.js';
 import { toolResult, PRIVATE_MARKER, RETURN_TYPE } from './private-extension.js';
 
 export function createExtension(deps = {}) {
@@ -40,7 +40,7 @@ return function subconsciousExtension(pi) {
     disabled = context.sessionManager.getEntries().some(entry => entry.type === 'custom' && [PRIVATE_MARKER, TASK_MARKER].includes(entry.customType));
     if (disabled) return;
     ctx = context; clientId = randomUUID(); running = !context.isIdle();
-    client = new Client(loadConfig(pi.getSettings().subconscious?.configPath ?? join(context.cwd, '.pi/settings.json'), { agentDir: deps.agentDir ?? pi.getSettings().subconscious?.agentDir, sessionFactoryModule: deps.sessionFactoryModule ?? pi.getSettings().subconscious?.sessionFactoryModule }));
+    client = new Client(loadConfig(pi.getSettings().subconscious?.configPath ?? join(context.cwd, '.pi/settings.json'), { agentDir: deps.agentDir, settings: pi.getSettings() }));
     try { await client.ensure(); await update(); } catch (error) { warn(error); }
     timer = setInterval(() => {
       // Also clears an input claim handled by another extension without a run.

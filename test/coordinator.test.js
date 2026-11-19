@@ -6,7 +6,8 @@ import { SessionManager } from '@earendil-works/pi-coding-agent';
 import { Coordinator, startService } from '../src/service.js';
 import { Client } from '../src/client.js';
 import { Store } from '../src/store.js';
-import { originContext } from '../src/sessions.js';
+import { originContext, nativeOperations } from '../src/native-operations.js';
+import { persistSession } from '../src/rpc-extension.js';
 import { RETURN_TYPE } from '../src/private-extension.js';
 import { fixture, deferred, call, assistantMessage, syntheticModel } from './helpers.js';
 
@@ -16,6 +17,22 @@ function source(config, id = 'source-call') {
   manager.appendMessage({ ...assistantMessage(''), content: [call('subconscious_reflect', { content: 'Explore a fictional question.' }, id)], stopReason: 'toolUse' });
   return { manager, source: originContext(manager, id) };
 }
+
+test('native recovery preserves unknown external outcomes and appends a resolved receipt only once', t => {
+  const { config } = fixture(t), manager = SessionManager.create(config.workspace, join(config.dataDir, 'sessions'));
+  const entry = manager.appendMessage({ ...assistantMessage(''), content: [call('external_action', {}, 'accepted')], stopReason: 'toolUse' });
+  const key = `${manager.getSessionId()}:${entry}:accepted`;
+  const row = { id: 'recovery', kind: 'reflection', title: 'Controlled recovery', sessionFile: manager.getSessionFile(), sessionId: manager.getSessionId(), transcriptCommitted: true };
+  const args = { row, directory: join(config.dataDir, 'sessions'), cwd: config.workspace, storeId: config.storeId, actions: { [key]: { status: 'started', name: 'external_action' } }, receipts: {} };
+  const prepare = nativeOperations(persistSession)['private.prepare'];
+  assert.match(prepare(args).blocked, /Unknown outcome/);
+  assert.equal(SessionManager.open(row.sessionFile).getEntries().filter(e => e.type === 'message' && e.message.role === 'toolResult').length, 0);
+  args.actions[key] = { status: 'completed', result: { content: [{ type: 'text', text: 'Observed completed action' }] } };
+  assert.equal(prepare(args).blocked, undefined);
+  prepare(args);
+  assert.equal(SessionManager.open(row.sessionFile).getEntries().filter(e => e.type === 'message' && e.message.role === 'toolResult').length, 1);
+  assert.throws(() => prepare({ ...args, row: { ...row, sessionFile: join(config.dataDir, 'missing.jsonl') } }), /transcript is unavailable/);
+});
 
 test('reflection processing respects pause and serializes work', async t => {
   const { config } = fixture(t);

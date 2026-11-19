@@ -3,11 +3,11 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, chmodSync, 
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
-import { SessionManager, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { piRequest } from './rpc.js';
 import { Store, text } from './store.js';
 import { Gate } from './gate.js';
 import { assertProfilePath, expandPath } from './config.js';
-import { PiSessions, originContext, originPresent, deliveredIds, syncSession, sessionMatches, assistantMessage } from './sessions.js';
+import { PiSessions } from './sessions.js';
 
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } }
 export function acquireLock(config) {
@@ -48,43 +48,25 @@ export class Coordinator {
     this.errors = new Map(); this.missingTools = new Map();
     this.sessions = options.sessions ?? new PiSessions(this, options);
     this.running = false; this.stopping = false;
-    this.sessions.recover?.();
+    this.requestPi = options.requestPi ?? piRequest;
+    this.steps = new Map();
     for (const row of this.store.list()) if (row.stepCompleted) this.completeStep(row.id, row.stepCompleted);
   }
-  startChat(args, key, model) {
+  async startChat(args, key, model) {
     const { store, config } = this;
     if (store.state.receipts[key]) return store.state.receipts[key];
     text(args.title, 'title'); text(args.message, 'message');
-    let manager;
-    const plan = store.state.chatPlans[key];
-    if (plan) { assertProfilePath(config, plan.file); manager = SessionManager.open(plan.file); }
-    else {
-      const settings = SettingsManager.create(config.workspace, config.agentDir);
-      // Pi's documented per-workspace session directory convention. An explicit
-      // Pi sessionDir setting takes precedence; no private session folder here.
-      const safePath = `--${config.workspace.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`;
-      const sessionDirectory = config.profileRoot ? join(config.profileRoot, 'sessions') :
-        settings.getSessionDir() ? expandPath(settings.getSessionDir(), config.workspace) : join(config.agentDir, 'sessions', safePath);
-      manager = SessionManager.create(config.workspace, sessionDirectory);
-      const metadata = { api: model?.api, provider: model?.provider, id: model?.id };
-      assistantMessage(args.message, metadata);
-      store.change(state => { state.chatPlans[key] = { file: manager.getSessionFile(), title: args.title, message: args.message, model: metadata }; });
+    let plan = store.state.chatPlans[key];
+    if (!plan) {
+      const created = await this.requestPi(config, 'chat.create', { cwd: config.workspace, directory: join(config.workspace, 'sessions') });
+      plan = { ...created, title: args.title, message: args.message, model: { api: model?.api, provider: model?.provider, id: model?.id } };
+      store.change(state => { state.chatPlans[key] = plan; });
     }
-    const saved = store.state.chatPlans[key];
-    assertProfilePath(config, manager.getSessionFile());
-    if (!manager.getEntries().some(entry => entry.type === 'custom' && entry.customType === 'pi-subconscious:opening' && entry.data?.receipt === key)) {
-      manager.appendCustomEntry('pi-subconscious:opening', { receipt: key });
-      manager.appendSessionInfo(saved.title);
-      manager.appendMessage(assistantMessage(saved.message, saved.model));
-      const settings = SettingsManager.create(config.workspace, config.agentDir);
-      if (settings.getDefaultProvider() && settings.getDefaultModel()) manager.appendModelChange(settings.getDefaultProvider(), settings.getDefaultModel());
-      syncSession(manager);
-    }
+    assertProfilePath(config, plan.file);
+    const created = await this.requestPi(config, 'chat.create', { path: plan.file, ...plan, key });
     return store.once(key, state => {
-      const id = randomUUID();
-      const result = { id, sessionId: manager.getSessionId(), file: manager.getSessionFile(), title: saved.title };
-      state.deliveries[id] = { id, kind: 'new-chat', ...result, status: 'available', createdAt: Date.now() };
-      return result;
+      const id = randomUUID(), result = { id, ...created };
+      state.deliveries[id] = { ...result, kind: 'new-chat', status: 'available', createdAt: Date.now() }; return result;
     });
   }
   chats(args) { return this.sessions.chats(args); }
@@ -94,21 +76,25 @@ export class Coordinator {
     this.gate.update(params.id, data);
     return data;
   }
-  sourceClient(id) {
+  async sourceClient(id) {
     const client = this.gate.clients.get(id);
     if (!client) throw new Error('Foreground registration expired; reconnect before continuing');
     assertProfilePath(this.config, client.file);
-    if (!sessionMatches({ file: client.file, sessionId: client.sessionId })) throw new Error('The registered source Pi session is unavailable');
+    const header = await this.requestPi(this.config, 'session.header', { path: client.file });
+    if (header.id !== client.sessionId) throw new Error('The registered source Pi session is unavailable');
     return client;
   }
-  pending(id) {
+  async pending(id) {
     const registered = this.gate.clients.get(id);
     if (!registered) throw new Error('Foreground registration expired; reconnect before continuing');
     // A fresh Pi session has its filename before its first message is persisted.
     if (!registered.file || !existsSync(registered.file)) return [];
-    const client = this.sourceClient(id);
-    const manager = SessionManager.open(client.file);
-    const received = deliveredIds(manager);
+    const deliveries = Object.values(this.store.state.deliveries).filter(row => row.kind !== 'new-chat' && row.status === 'pending' && row.source.file === realpathSync(registered.file) && row.source.sessionId === registered.sessionId);
+    if (!deliveries.length) return [];
+    const client = await this.sourceClient(id);
+    const checks = await this.requestPi(this.config, 'source.deliveries', { path: client.file, sessionId: client.sessionId, deliveries });
+    const received = new Set(checks.filter(row => row.received).map(row => row.id));
+    const present = new Set(checks.filter(row => row.present).map(row => row.id));
     const pending = [];
     let changed = false;
     for (const delivery of Object.values(this.store.state.deliveries)) {
@@ -116,15 +102,15 @@ export class Coordinator {
       if (delivery.source.file !== realpathSync(client.file) || delivery.source.sessionId !== client.sessionId) continue;
       if (received.has(delivery.id)) {
         delivery.status = 'delivered'; delivery.deliveredAt = Date.now(); changed = true;
-      } else if (originPresent(manager, delivery.source)) pending.push({ id: delivery.id, content: delivery.content });
+      } else if (present.has(delivery.id)) pending.push({ id: delivery.id, content: delivery.content });
     }
     if (changed) this.store.save();
     return pending;
   }
-  inspect(id, args = {}) {
+  async inspect(id, args = {}) {
     const row = this.store.row(id);
     assertProfilePath(this.config, row.sessionFile);
-    const entries = row.sessionFile && existsSync(row.sessionFile) ? SessionManager.open(row.sessionFile).getEntries() : [];
+    const entries = row.sessionFile && existsSync(row.sessionFile) ? await this.requestPi(this.config, 'session.entries', { path: row.sessionFile }) : [];
     return { conversation: structuredClone(row), ...boundedPage(entries, args), transcriptWarning: row.sessionFile && !existsSync(row.sessionFile) ? 'The saved transcript is unavailable; it has not been deleted.' : null, live: this.sessions.inspect?.(id) ?? null };
   }
   resolveAction(args) {
@@ -143,12 +129,41 @@ export class Coordinator {
       delete row.blocked; delete row.blockedAction; delete row.retryAt; row.nextWake = Date.now();
       // Force reopening so repaired receipts are projected into Pi history.
       const session = this.sessions.sessions?.get(row.id);
-      session?.dispose(); this.sessions.sessions?.delete(row.id);
+      void session?.close(); this.sessions.sessions?.delete(row.id);
       return { resolved: true };
     });
   }
+  releaseSteps(id) { for (const [token, step] of this.steps) if (step.id === id) { step.release(); this.steps.delete(token); } }
   async call(method, params = {}) {
     switch (method) {
+      case 'private.row': return this.store.row(params.id);
+      case 'private.enter': {
+        const row = this.store.row(params.id);
+        if (row.status !== 'active' || row.blocked) throw new Error('This private conversation has finished or requires recovery.');
+        if (params.kind === 'tool' && this.store.state.actions[params.token]) throw new Error('This invocation already has a receipt; it was not replayed.');
+        const release = await this.gate.privateStep(params.kind, params.token, this.signal);
+        this.steps.set(params.token, { id: row.id, release });
+        if (params.kind === 'tool') this.store.change(state => { state.actions[params.token] = { status: 'started', conversationId: row.id, name: params.tool, args: params.args, callId: params.callId, sessionId: params.sessionId, startedAt: Date.now() }; });
+        else this.sessions.observations?.set(row.id, { queuedAt: Date.now(), startedAt: Date.now(), context: params.payload, model: params.model, messageCount: params.payload?.messages?.length ?? 0 });
+        return { admitted: true };
+      }
+      case 'private.release': { const request = this.sessions.observations?.get(params.id); if (request) request.finishedAt = Date.now(); } this.steps.get(params.token)?.release(); this.steps.delete(params.token); return { released: true };
+      case 'private.complete': {
+        try { this.store.change(state => { const action = state.actions[params.token]; if (action) Object.assign(action, { status: 'completed', result: params.result }); }); }
+        finally { this.steps.get(params.token)?.release(); this.steps.delete(params.token); }
+        return { completed: true };
+      }
+      case 'private.operation': {
+        const row = this.store.row(params.id);
+        switch (params.tool) {
+          case 'subconscious_source': if (row.kind !== 'reflection') throw new Error('This reflection has no source.'); return row.source.context;
+          case 'subconscious_return': return this.store.finish(row.id, params.args.content, params.key);
+          case 'subconscious_finish': return this.store.finish(row.id, undefined, params.key);
+          case 'subconscious_start_chat': return this.startChat(params.args, params.key, params.model);
+          case 'subconscious_chats': return this.chats(params.args);
+          default: throw new Error('Unknown private tool.');
+        }
+      }
       case 'ping': return { pid: process.pid, storeId: this.config.storeId, stopping: this.stopping };
       case 'status': return { paused: this.store.state.paused, active: this.gate.active, clients: [...this.gate.clients].map(([id, value]) => ({ id, ...value, stale: Date.now() - value.seen > this.config.staleClientMs })), conversations: this.store.list(), pendingDeliveries: Object.values(this.store.state.deliveries).filter(delivery => delivery.status === 'pending').map(delivery => ({ id: delivery.id, sessionId: delivery.source.sessionId, file: delivery.source.file })), missingTools: Object.fromEntries(this.missingTools), errors: Object.fromEntries(this.errors) };
       case 'pause': this.store.change(state => { state.paused = params.paused !== false; }); this.gate.wake(); return { paused: this.store.state.paused };
@@ -161,9 +176,8 @@ export class Coordinator {
       case 'foreground.enter': { const data = this.foreground({ ...params, busy: true }); await this.gate.foreground(params.id, data, this.signal); return { admitted: true }; }
       case 'foreground.leave': this.gate.remove(params.id); return { removed: true };
       case 'reflection.create': {
-        const client = this.sourceClient(params.clientId);
-        const manager = SessionManager.open(client.file);
-        const source = originContext(manager, params.callId);
+        const client = await this.sourceClient(params.clientId);
+        const source = await this.requestPi(this.config, 'source.context', { path: client.file, callId: params.callId });
         const result = this.store.reflect(source.thought, source, `${source.sessionId}:${source.entryId}:${source.callId}`);
         this.gate.wake(); return { id: result.id, status: result.status };
       }
@@ -185,7 +199,7 @@ export class Coordinator {
       this.completeStep(row.id, this.store.row(row.id).stepCompleted ?? { ...result, completedAt: Date.now() });
       this.errors.delete(row.id);
     } catch (error) {
-      if (!this.stopping) {
+      if (!this.stopping && this.store.row(row.id).status === 'active') {
         this.errors.set(row.id, error.message);
         this.store.change(() => { const current = this.store.row(row.id); current.error = error.message; current.retryAt = Date.now() + this.config.errorRetryMs; current.lastStep = Date.now(); });
       }
@@ -212,14 +226,12 @@ export class Coordinator {
 }
 
 export async function startService(config, options = {}) {
-  if (config.sessionFactoryModule && !options.createSession) {
-    const { createPrivateSession } = await import(pathToFileURL(config.sessionFactoryModule));
-    options = { ...options, createSession: createPrivateSession };
-  }
   const releaseLock = acquireLock(config);
   let coordinator, server;
   try {
     coordinator = new Coordinator(config, options);
+    await coordinator.sessions.recover?.();
+    for (const row of coordinator.store.list()) if (row.stepCompleted) coordinator.completeStep(row.id, row.stepCompleted);
     if (process.platform !== 'win32' && existsSync(config.socketPath)) rmSync(config.socketPath);
     server = createServer(async (request, response) => {
       try {

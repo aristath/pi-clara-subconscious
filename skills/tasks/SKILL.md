@@ -79,37 +79,13 @@ task, so it can gather deterministic input before forming the prompt.
 
 `@session fresh` starts a new conversation each run and is the default.
 `@session continue` reopens this task's previous conversation. Each task has its
-own conversation; it does not reuse a frontend chat. Native Pi loads the owner's
+own conversation; it does not reuse a frontend chat. Native Pi loads the execution profile's
 settings, extensions, model, and permitted tools. The prompt is passed as a task custom
 message; the scheduler does not add an agenda or require a particular result.
 
-### Task-specific settings
+### Execution profile
 
-An inference task can also export a `settings` object with ordinary Pi settings:
-
-```js
-/**
- * @every 1 day
- * @mode inference
- * @session fresh
- */
-export const settings = {
-  defaultThinkingLevel: 'high',
-  defaultTools: ['read', 'ls'],
-};
-export default 'Read the project notes and consider the next steps.';
-```
-
-The host merges these overrides into the owner's settings using Pi's normal
-rules before loading extensions. Relative paths still use the owner's profile
-directory.
-Overrides and settings changes made by that session stay in memory, including
-across a resource reload. The user's settings files are not rewritten.
-The host application’s model and permission controls still apply.
-
-Omitting `settings` keeps the usual profile configuration. Settings are read
-again on the next run. A continued conversation retains its session state;
-use `@session fresh` to start a new conversation.
+The host can supply an `executionCwd` for inference. Pi loads that working directory's normal `.pi/settings.json`, extensions, SOUL and tools. The task function still receives its originating owner's `cwd` and `user`. Return explicit source paths in the prompt when referring to that owner's files. Execution profile configuration is separate from task ownership and saved task progress.
 
 For example, a less frequent task can use:
 

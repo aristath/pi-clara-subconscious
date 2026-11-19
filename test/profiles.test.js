@@ -17,10 +17,10 @@ test('a profile cannot inspect another profile through private transcript paths 
   const other = SessionManager.create(outside, join(outside, 'sessions'));
   other.appendMessage({ role: 'user', content: 'Private to the other profile', timestamp: 1 });
   coordinator.store.change(state => { state.conversations['sample-reflection'].sessionFile = other.getSessionFile(); });
-  assert.throws(() => coordinator.inspect('sample-reflection'), /another profile/);
+  await assert.rejects(coordinator.inspect('sample-reflection'), /another profile/);
   symlinkSync(outside, join(f.workspace, 'shortcut'));
   coordinator.store.change(state => { state.conversations['sample-reflection'].sessionFile = join(f.workspace, 'shortcut', 'not-yet-created.jsonl'); });
-  assert.throws(() => coordinator.inspect('sample-reflection'), /outside/);
+  await assert.rejects(coordinator.inspect('sample-reflection'), /outside/);
   unlinkSync(coordinator.store.path);
   assert.throws(() => new Store(config), /temporarily unavailable/);
 });

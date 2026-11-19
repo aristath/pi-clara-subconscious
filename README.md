@@ -1,7 +1,7 @@
 # pi-subconscious
 
-Scheduled tasks and chat-triggered private reflections using native Pi sessions,
-settings, models, and configured tools.
+Scheduled tasks and chat-triggered private reflections using the system-installed `pi --mode rpc`,
+native settings, sessions, models, and configured tools.
 
 ## Scheduled tasks
 
@@ -45,10 +45,7 @@ A continuing inference task:
 export default 'Continue the work described in this task’s notebook.';
 ```
 
-Inference tasks may export `settings` to override Pi and extension configuration
-for that task's session. The
-host applies Pi's normal merge rules and keeps those settings in memory; the
-profile's settings files stay unchanged. See the authoring guide for an example.
+Inference tasks use the host's `executionCwd`, or their owner's directory when none is supplied. The installed `pi` command loads that directory's ordinary configuration. Task ownership, source paths and saved sessions remain associated with the originating user.
 
 Intervals include calendar months, such as `@every 6 months`. Inference defaults
 to `@session fresh` unless the definition says `continue`.
@@ -92,19 +89,16 @@ Use the `subconscious` section of the profile’s `.pi/settings.json`:
 {
   "subconscious": {
     "dataDir": "./subconscious",
-    "initiallyPaused": true,
-    "model": null
+    "initiallyPaused": true
   }
 }
 ```
 
 `dataDir` resolves from the profile directory. The native Pi agent directory
-supplies package configuration. `model: null` follows the profile’s default;
-otherwise use `{ "provider": "provider-id", "id": "model-id" }`.
-`allowedTools` contains exact permitted private tool names. The default is
-`read`, `ls`, `find`, and `grep`; tools from other extensions must be configured
-explicitly. General execution and
-delegation are excluded; a trusted host factory supplies guarded file tools.
+supplies package configuration. Model selection uses the execution profile's ordinary Pi settings.
+Configure tools in the private execution profile using normal Pi settings.
+Its optional `subconscious.allowedTools` list restricts private reflections to
+those exact names; otherwise they use that profile's active tools.
 
 Heartbeat, stale-client, and error-retry options are
 `heartbeatMs` (3000), `staleClientMs` (15000), and `errorRetryMs` (30000).
@@ -115,7 +109,7 @@ Run the reflection coordinator from the owner’s profile directory:
 node /path/to/pi-subconscious/src/cli.js serve --config .pi/settings.json
 ```
 
-An embedding host can supply its trusted `--agent-dir` and `--factory` arguments.
+A host can supply `--agent-dir` to select Pi’s native agent directory. `subconscious.cwd` selects the private execution profile; it does not change the originating owner or coordinator store.
 The supplied [systemd unit](examples/pi-subconscious.service) allows a
 current call to finish during shutdown. Use an equivalent supervisor when systemd
 is unavailable.

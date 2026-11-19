@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
 import extension from '../src/extension.js';
 import { startService } from '../src/service.js';
-import { originContext } from '../src/sessions.js';
+import { originContext } from '../src/native-operations.js';
 import { RETURN_TYPE } from '../src/private-extension.js';
 import { fixture, foreground, output, call, deferred, assistantMessage } from './helpers.js';
 

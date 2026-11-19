@@ -38,7 +38,7 @@ export class Client {
     mkdirSync(this.config.dataDir, { recursive: true, mode: 0o700 });
     const fd = openSync(join(this.config.dataDir, 'service.log'), 'a', 0o600);
     const executable = /^node(?:\.exe)?$/.test(basename(process.execPath)) ? process.execPath : 'node';
-    const child = spawn(executable, [fileURLToPath(new URL('./cli.js', import.meta.url)), 'serve', '--config', this.config.configPath, '--agent-dir', this.config.agentDir, ...(this.config.sessionFactoryModule ? ['--factory', this.config.sessionFactoryModule] : [])], { detached: true, stdio: ['ignore', fd, fd], cwd: this.config.workspace });
+    const child = spawn(executable, [fileURLToPath(new URL('./cli.js', import.meta.url)), 'serve', '--config', this.config.configPath, '--agent-dir', this.config.agentDir], { detached: true, stdio: ['ignore', fd, fd], cwd: this.config.workspace });
     closeSync(fd);
     child.unref();
     let spawnError;

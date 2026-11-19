@@ -1,7 +1,6 @@
 {
   "subconscious": {
     "dataDir": "./subconscious",
-    "initiallyPaused": true,
-    "model": null
+    "initiallyPaused": true
   }
 }

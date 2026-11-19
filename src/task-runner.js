@@ -3,8 +3,7 @@ import { readFile, open, mkdir, realpath } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, relative, isAbsolute } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { SessionManager } from '@earendil-works/pi-coding-agent';
-import { gateStream, syncSession } from './sessions.js';
+import { PiProcess, rpcExtension } from './rpc.js';
 import { acquireLock } from './service.js';
 import { TASK_MARKER } from './config.js';
 
@@ -42,7 +41,7 @@ export async function runTask(task, context, control) {
     });
   });
   send({ type: 'run', task: { ...task, user: { id: task.user.id, admin: task.user.admin } },
-    workerConfig: context.workerConfig, factory: context.workerPath, sessionFile: control.sessionFile,
+    executionCwd: context.executionCwd ?? context.workspace, piCommand: context.piCommand, agentDir: context.agentDir, sessionFile: control.sessionFile,
     lockDir: context.taskLockDir });
   return result;
 }
@@ -71,7 +70,7 @@ async function worker(input) {
     await new Promise((resolve, reject) => { waiting.set(id, { resolve, reject }); process.send({ type: 'enter', kind, id }); });
     return () => { if (process.connected) process.send({ type: 'release', id }); };
   } };
-  let session, releaseLock;
+  let peer, releaseLock;
   try {
     if (input.lockDir) releaseLock = acquireLock({ dataDir: input.lockDir });
     const task = await import(pathToFileURL(input.task.path));
@@ -80,8 +79,6 @@ async function worker(input) {
       await task.default({ cwd: input.task.folder, user: input.task.user.id, signal: controller.signal });
       return;
     }
-    if (task.settings !== undefined && (!task.settings || typeof task.settings !== 'object' || Array.isArray(task.settings)))
-      throw new Error('Export settings as a Pi settings object.');
     const prompt = typeof task.default === 'function'
       ? await task.default({ cwd: input.task.folder, user: input.task.user.id, signal: controller.signal }) : task.default;
     if (typeof prompt !== 'string' || !prompt.trim()) throw new Error('An inference task must export a prompt string or a function returning one.');
@@ -97,43 +94,41 @@ async function worker(input) {
     }
     const previous = input.sessionFile && await realpath(input.sessionFile);
     if (previous) check(previous);
-    let manager = previous ? SessionManager.open(previous, directory) : SessionManager.create(input.task.folder, directory);
-    if (!input.sessionFile) {
-      manager.appendCustomEntry(TASK_MARKER, { file: input.task.name });
-      // Pi delays an empty session's first disk write until generation. Retain
-      // its identity now so subsequent runs cannot silently replace it.
-      const file = await open(manager.getSessionFile(), 'wx', 0o600);
-      try { await file.writeFile([manager.getHeader(), ...manager.getEntries()].map(value => JSON.stringify(value)).join('\n')+'\n'); await file.sync(); }
-      finally { await file.close(); }
-      manager = SessionManager.open(manager.getSessionFile(), directory);
-    }
-    await ask({ type: 'session', file: manager.getSessionFile() });
     const held = new Map();
-    const extension = { name: 'scheduled-task', factory(api) {
-      api.on('session_start', () => api.setActiveTools(api.getActiveTools().filter(name => name !== 'subconscious_reflect')));
-      api.on('tool_call', async event => {
-        try { held.set(event.toolCallId, await gate.privateStep('tool')); }
-        catch (error) { return { block: true, reason: error.message }; }
-      });
-      api.on('tool_execution_end', event => { held.get(event.toolCallId)?.(); held.delete(event.toolCallId); });
-      api.on('session_shutdown', () => { for (const release of held.values()) release(); held.clear(); });
-    } };
-    const { runtimeFactory } = await import(pathToFileURL(input.factory));
-    const config = JSON.parse(await readFile(input.workerConfig, 'utf8'));
-    const result = await (await runtimeFactory(config, { privateExtension: extension, settingsOverrides: task.settings }))({ sessionManager: manager });
-    session = result.session;
-    session.agent.toolExecution = 'sequential';
-    session.agent.streamFunction = gateStream(session.agent.streamFunction, gate, input.task.name, controller.signal);
-    const errors = [];
-    await session.bindExtensions({ mode: 'rpc', onError: error => errors.push(error.error ?? String(error)) });
-    if (errors.length) throw new Error(errors.join('\n'));
+    let settle, failure;
+    const settled = new Promise(resolve => { settle = resolve; });
+    peer = new PiProcess({ cwd: input.executionCwd, command: input.piCommand ?? 'pi',
+      args: ['--approve', '--session-dir', directory, ...(previous ? ['--session', previous] : []), '-e', rpcExtension,
+        '-e', fileURLToPath(new URL('./task-runtime.js', import.meta.url)), '--scheduled-task', input.task.path],
+      env: { ...process.env, PI_CODING_AGENT_DIR: input.agentDir }, onEvent: event => {
+        if (event.type === 'agent_settled') settle();
+        if (event.type === 'extension_ui_request' && event.title?.startsWith('pi-task:enter:')) {
+          const token = String(++sequence);
+          void gate.privateStep(event.title.split(':').at(-1)).then(release => {
+            held.set(token, release); peer.send({ type: 'extension_ui_response', id: event.id, value: token });
+          }, error => { failure = error; peer.send({ type: 'extension_ui_response', id: event.id, cancelled: true }); });
+        }
+        if (event.type === 'extension_ui_request' && event.method === 'notify' && event.message?.startsWith('pi-task:release:')) {
+          const token = event.message.slice('pi-task:release:'.length); held.get(token)?.(); held.delete(token);
+        }
+        if (event.type === 'extension_error') failure = new Error(event.error);
+      } });
+    await peer.request('get_state');
+    const file = await peer.invoke('session.flush');
+    const switched = await peer.request('switch_session', { sessionPath: file });
+    if (switched.cancelled) throw new Error('Pi could not reopen the task session.');
+    await ask({ type: 'session', file });
     process.send({ type: 'initialized' });
-    await session.sendCustomMessage({ customType: TASK_MARKER, content: prompt, display: false }, { triggerTurn: true });
-    syncSession(session.sessionManager);
-    const last = session.messages.findLast(message => message.role === 'assistant');
-    if (last?.stopReason === 'error' || last?.stopReason === 'aborted') throw new Error(last.errorMessage ?? 'Task inference did not finish');
+    const { commands } = await peer.request('get_commands');
+    if (!commands.some(command => command.name === 'task-run')) throw new Error('The task extension failed to load.');
+    await peer.request('prompt', { message: '/task-run ' + JSON.stringify({ prompt, owner: { id: input.task.user.id, cwd: input.task.folder, task: input.task.name } }) });
+    await Promise.race([settled, peer.exited.then(() => { throw new Error('Task Pi stopped before settling.'); })]);
+    for (const release of held.values()) release();
+    if (failure) throw failure;
+    const { messages } = await peer.request('get_messages'), last = messages.findLast(message => message.role === 'assistant');
+    if (['error', 'aborted'].includes(last?.stopReason)) throw new Error(last.errorMessage ?? 'Task inference did not finish');
   } finally {
-    if (session) { await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' }); await session.dispose(); }
+    if (peer) await peer.close();
     releaseLock?.();
   }
 }

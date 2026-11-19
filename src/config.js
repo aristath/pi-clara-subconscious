@@ -1,4 +1,3 @@
-import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
@@ -12,13 +11,6 @@ export const INTERNAL_TOOLS = [
   'subconscious_chats',
 ];
 export const DEFAULT_TOOLS = ['read', 'ls', 'find', 'grep'];
-export const FORBIDDEN_TOOLS = new Set([
-  'bash', 'powershell', 'shell', 'exec', 'edit', 'write',
-  'exec_command', 'run_command', 'run_shell', 'terminal', 'apply_patch',
-  'write_file', 'edit_file', 'execute_code', 'run_code',
-  'codemode', 'tool_search', 'subagent', 'spawn_agent',
-]);
-const guardedMutation = (config, name) => config.profileRoot && config.sessionFactoryModule && ['write', 'edit'].includes(name);
 export function expandPath(path, base = process.cwd()) {
   if (typeof path !== 'string' || !path.trim()) throw new Error('Expected a nonempty path');
   return path === '~' ? homedir() : path.startsWith('~/') ? join(homedir(), path.slice(2)) : resolve(base, path);
@@ -42,9 +34,8 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
   const input = existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Configuration must be a JSON object');
   const base = dirname(dirname(path));
-  const agentDir = expandPath(overrides.agentDir ?? getAgentDir(), base);
-  const merged = SettingsManager.create(base, agentDir, { projectTrusted: true }).getSettings();
-  const raw = { ...merged.subconscious, ...input.subconscious, ...overrides };
+  const agentDir = expandPath(overrides.agentDir ?? process.env.PI_CODING_AGENT_DIR ?? join(homedir(), '.pi/agent'), base);
+  const raw = { ...(overrides.settings?.subconscious ?? input.subconscious), ...overrides };
   let dataDir = expandPath(raw.dataDir ?? './subconscious', base);
   // Existing symlink aliases must share a coordinator.
   if (existsSync(dataDir)) dataDir = realpathSync(dataDir);
@@ -53,12 +44,12 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
     workspace: base,
     agentDir,
     profileRoot: base, sourceRoots: [],
-    ...(overrides.sessionFactoryModule ? { sessionFactoryModule: expandPath(overrides.sessionFactoryModule, base) } : {}),
+    executionCwd: expandPath(raw.cwd ?? base, base),
+    piCommand: raw.piCommand ?? 'pi',
     initiallyPaused: raw.initiallyPaused === true,
     errorRetryMs: raw.errorRetryMs ?? 30000,
     heartbeatMs: raw.heartbeatMs ?? 3000,
     staleClientMs: raw.staleClientMs ?? 15000,
-    model: raw.model ?? null,
     allowedTools: raw.allowedTools ?? DEFAULT_TOOLS,
     additionalExtensionPaths: [],
   };
@@ -68,22 +59,10 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
   }
   if (config.heartbeatMs < 100 || config.staleClientMs < config.heartbeatMs * 2) throw new Error('staleClientMs must allow at least two heartbeats (heartbeatMs >= 100)');
   if (!Array.isArray(config.allowedTools) || config.allowedTools.some(t => typeof t !== 'string' || !/^[\w.-]+$/.test(t))) throw new Error('allowedTools must contain exact tool names, without wildcards');
-  if (config.allowedTools.some(t => FORBIDDEN_TOOLS.has(t) && !guardedMutation(config, t))) throw new Error('Shell, unguarded mutation, discovery wrappers, and delegation tools cannot be allowed');
-  if (config.model !== null && (typeof config.model?.provider !== 'string' || typeof config.model?.id !== 'string' || !config.model.provider || !config.model.id)) throw new Error('model must be null or {provider, id}');
   config.storeId = createHash('sha256').update(dataDir).digest('hex');
   config.socketPath = process.platform === 'win32'
     ? `\\\\.\\pipe\\pi-subconscious-${config.storeId.slice(0, 24)}`
     : join(dataDir, 'service.sock');
   if (process.platform !== 'win32' && Buffer.byteLength(config.socketPath) > 100) throw new Error('dataDir is too long for a local socket; choose a shorter path');
   return config;
-}
-
-export function allowedTool(config, name, definitions = []) {
-  if (config.toolPolicy && !config.toolPolicy(name)) return false;
-  if (name === 'tool_search' && config.sessionFactoryModule && config.toolPolicy) return true;
-  if (FORBIDDEN_TOOLS.has(name) && !guardedMutation(config, name)) return false;
-  if (!config.toolPolicy && ![...INTERNAL_TOOLS, ...config.allowedTools].includes(name)) return false;
-  // General wrappers can reach unapproved services without emitting nested calls.
-  const tool = definitions.find(t => t.name === name);
-  return !tool?.reachesTools;
 }

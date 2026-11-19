@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Store } from '../src/store.js';
-import { loadConfig, allowedTool } from '../src/config.js';
+import { loadConfig } from '../src/config.js';
 import { fixture } from './helpers.js';
 
 test('each reflection has its own source and can finish silently or return once', t => {
@@ -31,12 +31,8 @@ test('an invalid mutation does not lose previously accepted state', t => {
   assert.equal(new Store(config).state.paused, true);
 });
 
-test('tool allowlist uses exact names and excludes execution, mutation and wrappers', t => {
+test('tool configuration requires exact names', t => {
   const f = fixture(t);
-  assert.equal(allowedTool(f.config, 'read'), true);
-  for (const name of ['bash', 'write', 'edit', 'codemode', 'tool_search', 'subagent', 'not_configured']) assert.equal(allowedTool(f.config, name), false);
-  assert.equal(allowedTool(f.config, 'read', [{ name: 'read', reachesTools: () => 'all' }]), false);
-  assert.throws(() => f.writeConfig({ allowedTools: ['bash'] }), /cannot be allowed/);
   assert.throws(() => f.writeConfig({ allowedTools: ['*'] }), /without wildcards/);
-  assert.throws(() => f.writeConfig({ model: { provider: 'synthetic' } }), /model must be/);
+  assert.throws(() => f.writeConfig({ allowedTools: [42] }), /exact tool names/);
 });

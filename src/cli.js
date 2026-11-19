@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Client } from './client.js';
 import { loadConfig } from './config.js';
+import { piRequest } from './rpc.js';
+import { dirname } from 'node:path';
 import { durableWrite } from './store.js';
 
 export async function main(argv = process.argv.slice(2)) {
@@ -15,7 +17,10 @@ export async function main(argv = process.argv.slice(2)) {
     if (!value || value.startsWith('--')) throw new Error(`${name} needs a value`);
     args.splice(index, 2); return value;
   };
-  const config = loadConfig(take('--config'), { agentDir: take('--agent-dir'), sessionFactoryModule: take('--factory') });
+  const path = take('--config'), agentDir = take('--agent-dir');
+  const initial = loadConfig(path, { agentDir });
+  const { settings } = await piRequest({ workspace: initial.workspace, agentDir: initial.agentDir, piCommand: initial.piCommand }, 'settings');
+  const config = loadConfig(path, { agentDir, settings });
   const command = args.shift() ?? 'status';
   if (command === 'help' || command === '--help') {
     console.log('pi-subconscious [--config PATH] init|start|serve|stop|status|pause|resume|list|read ID [OFFSET]|actions|resolve JSON|notifications|ack ID|unregister CLIENT_ID');
@@ -24,7 +29,7 @@ export async function main(argv = process.argv.slice(2)) {
   if (command === 'init') {
     const document = readable(config.configPath) ? JSON.parse(readFileSync(config.configPath, 'utf8')) : {};
     if (document.subconscious) throw new Error('subconscious is already configured in Pi settings');
-    document.subconscious = { dataDir: './subconscious', initiallyPaused: true, model: null, allowedTools: config.allowedTools };
+    document.subconscious = { dataDir: './subconscious', initiallyPaused: true, allowedTools: config.allowedTools };
     durableWrite(config.configPath, JSON.stringify(document, null, 2) + '\n');
     console.log(`Created ${config.configPath}`); return;
   }
