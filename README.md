@@ -7,7 +7,7 @@ native settings, sessions, models, and configured tools.
 
 An embedding application creates a `TaskScheduler`. It reads
 `tasks/*.js` and `tasks/*.ts` inside each user’s profile, runs one due task at a
-time, and gives frontend chats priority between calls. Scheduled tasks do not
+time, and gives frontend chats priority between Pi turns (one model response and its tools). Scheduled tasks do not
 need a separate service or a per-user scheduler.
 
 [The scheduled-tasks skill](skills/tasks/SKILL.md) is the complete authoring guide:
@@ -52,8 +52,13 @@ to `@session fresh` unless the definition says `continue`.
 
 The host application uses `TaskScheduler` from `src/tasks.js` and `runTask` from
 `src/task-runner.js`. Its foreground admission uses the scheduler’s existing
-`Gate`. Task execution happens in a separate process with the owner’s cwd and Pi
-runtime. A task worker holds the existing process lock while it runs.
+`Gate`. Task execution happens in a separate process using the selected execution profile.
+A task worker holds the existing process lock while it runs.
+
+Pass the same `gate` to `TaskScheduler` and each reflection `startService(config, { gate })`
+to share one FIFO background queue across users. A background job keeps its place
+while yielding to chats between turns. Pi handles tool execution, compaction,
+retry and cancellation; tools do not acquire scheduling locks.
 
 ## Install
 
@@ -78,8 +83,8 @@ or end silently with `subconscious_finish`. They do not automatically prompt the
 frontend.
 
 Private reflection tools also include `subconscious_source`,
-`subconscious_start_chat`, and `subconscious_chats`. The existing model/tool gate,
-accepted-action recovery, and transcript inspection remain in use for reflections.
+`subconscious_start_chat`, and `subconscious_chats`. Reflections use the same turn
+boundaries and retain accepted-action recovery and transcript inspection.
 
 ### Configuration
 
@@ -111,7 +116,7 @@ node /path/to/pi-subconscious/src/cli.js serve --config .pi/settings.json
 
 A host can supply `--agent-dir` to select Pi’s native agent directory. `subconscious.cwd` selects the private execution profile; it does not change the originating owner or coordinator store.
 The supplied [systemd unit](examples/pi-subconscious.service) allows a
-current call to finish during shutdown. Use an equivalent supervisor when systemd
+current turn to finish during shutdown. Use an equivalent supervisor when systemd
 is unavailable.
 
 ### Controls
@@ -120,7 +125,7 @@ is unavailable.
 `resolve <JSON>`, and `notifications` use the existing coordinator. The CLI
 supports the same commands, plus `start`, `serve`, `stop`, and `init`.
 
-Pause is durable and lets the current call finish. It controls chat-triggered
+Pause is durable and lets the current turn finish. It controls chat-triggered
 reflections; the shared scheduled-task queue is configured by the host application.
 Inspection reads existing state and transcripts without starting a model turn.
 Private transcript contents are not automatically published to frontend chats.

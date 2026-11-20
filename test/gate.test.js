@@ -59,3 +59,19 @@ test('private work is serialized and shutdown wakes waiting boundaries', async (
   const rejected = assert.rejects(gate.privateStep('model', 'third'), /stopping/);
   gate.stop(); releaseSecond(); await rejected;
 });
+
+test('background jobs stay FIFO across turns, and a failed or cancelled job releases its place', async () => {
+  const gate = new Gate(), firstTurn = deferred(), finish = deferred(), order = [];
+  const first = gate.background('first', async () => {
+    order.push('first'); const release = await gate.privateStep('turn', 'first');
+    firstTurn.resolve(); await finish.promise; release(); throw new Error('Controlled failure');
+  });
+  const failed = assert.rejects(first, /Controlled failure/);
+  await firstTurn.promise;
+  const controller = new AbortController();
+  const cancelled = assert.rejects(gate.background('cancelled', () => assert.fail('Cancelled job ran'), controller.signal), /stopping/);
+  const second = gate.background('second', async () => { order.push('second'); (await gate.privateStep('turn', 'second'))(); });
+  controller.abort(); await cancelled;
+  assert.deepEqual(order, ['first']); finish.resolve(); await failed; await second;
+  assert.deepEqual(order, ['first', 'second']); assert.equal(gate.active, null); assert.equal(gate.jobs.length, 0);
+});

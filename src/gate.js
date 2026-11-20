@@ -2,7 +2,7 @@ export class Gate {
   constructor(paused = () => false, isAlive = pid => { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }, now = Date.now) {
     this.paused = paused; this.isAlive = isAlive;
     this.now = now; this.lastForegroundEnd = now();
-    this.clients = new Map(); this.waiters = new Set(); this.active = null; this.stopping = false;
+    this.clients = new Map(); this.waiters = new Set(); this.jobs = []; this.active = null; this.stopping = false;
   }
   wake() { for (const resolve of this.waiters) resolve(); this.waiters.clear(); }
   wait(signal) {
@@ -30,14 +30,23 @@ export class Gate {
     this.wake();
   }
   busy() { return [...this.clients.values()].some(client => client.busy); }
+  async background(id, work, signal) {
+    const job = { id };
+    this.jobs.push(job);
+    try {
+      while (this.jobs[0] !== job) await this.wait(signal);
+      if (this.stopping || signal?.aborted) throw new Error('Service stopping');
+      return await work();
+    } finally { this.jobs.splice(this.jobs.indexOf(job), 1); this.wake(); }
+  }
   async foreground(id, data, signal) {
     this.update(id, { ...data, busy: true });
     while (this.active && !this.stopping) await this.wait(signal);
-    if (this.stopping) throw new Error('Service stopping');
+    if (this.stopping || signal?.aborted) throw new Error('Service stopping');
   }
-  async privateStep(kind, id, signal) {
-    while (this.active || this.paused() || this.busy()) await this.wait(signal);
-    if (this.stopping) throw new Error('Service stopping');
+  async privateStep(kind, id, signal, paused = this.paused) {
+    while (this.active || paused() || this.busy()) await this.wait(signal);
+    if (this.stopping || signal?.aborted) throw new Error('Service stopping');
     const token = { kind, id, startedAt: Date.now() };
     this.active = token;
     let released = false;

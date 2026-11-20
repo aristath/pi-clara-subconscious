@@ -141,9 +141,10 @@ export class TaskScheduler {
     if (this.running || this.stopping || this.gate.busy()) return false;
     const task = (await this.pending())[0];
     if (!task || this.running || this.stopping) return false;
-    const work = this.run(task);
+    const work = this.gate.background(task.user.id+'/'+task.name, () => this.run(task));
     this.running = work;
-    try { await work; } finally { this.running = null; }
+    try { await work; } catch (error) { if (!this.stopping) throw error; }
+    finally { this.running = null; }
     return true;
   }
   async run(task) {

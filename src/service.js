@@ -43,7 +43,8 @@ export class Coordinator {
   constructor(config, options = {}) {
     this.config = config;
     this.store = options.store ?? new Store(config);
-    this.gate = new Gate(() => this.store.state.paused, options.isAlive);
+    this.ownsGate = !options.gate;
+    this.gate = options.gate ?? new Gate(undefined, options.isAlive);
     this.controller = new AbortController(); this.signal = this.controller.signal;
     this.errors = new Map(); this.missingTools = new Map();
     this.sessions = options.sessions ?? new PiSessions(this, options);
@@ -116,7 +117,7 @@ export class Coordinator {
   resolveAction(args) {
     const action = this.store.state.actions[args.key];
     if (!action || action.status !== 'started') throw new Error('No unresolved action with this receipt');
-    if (this.gate.active?.id === args.key) throw new Error('The original action is still running; wait for it to settle');
+    if (this.actionActive(action)) throw new Error('The original action is still running; wait for it to settle');
     if (this.store.row(action.conversationId).blockedAction !== args.key) throw new Error('This action is not awaiting resolution; inspect its original run');
     if (typeof args.executed !== 'boolean') throw new Error('Specify whether the action executed after inspecting its real outcome');
     if (args.executed && (!args.result || !Array.isArray(args.result.content))) throw new Error('An executed action needs its observed result content');
@@ -133,6 +134,7 @@ export class Coordinator {
       return { resolved: true };
     });
   }
+  actionActive(action) { return [...this.steps.values()].some(step => step.id === action.conversationId); }
   releaseSteps(id) { for (const [token, step] of this.steps) if (step.id === id) { step.release(); this.steps.delete(token); } }
   async call(method, params = {}) {
     switch (method) {
@@ -140,19 +142,25 @@ export class Coordinator {
       case 'private.enter': {
         const row = this.store.row(params.id);
         if (row.status !== 'active' || row.blocked) throw new Error('This private conversation has finished or requires recovery.');
-        if (params.kind === 'tool' && this.store.state.actions[params.token]) throw new Error('This invocation already has a receipt; it was not replayed.');
-        const release = await this.gate.privateStep(params.kind, params.token, this.signal);
+        const release = await this.gate.privateStep('turn', row.id, this.signal, () => this.store.state.paused);
         this.steps.set(params.token, { id: row.id, release });
-        if (params.kind === 'tool') this.store.change(state => { state.actions[params.token] = { status: 'started', conversationId: row.id, name: params.tool, args: params.args, callId: params.callId, sessionId: params.sessionId, startedAt: Date.now() }; });
-        else this.sessions.observations?.set(row.id, { queuedAt: Date.now(), startedAt: Date.now(), context: params.payload, model: params.model, messageCount: params.payload?.messages?.length ?? 0 });
         return { admitted: true };
       }
-      case 'private.release': { const request = this.sessions.observations?.get(params.id); if (request) request.finishedAt = Date.now(); } this.steps.get(params.token)?.release(); this.steps.delete(params.token); return { released: true };
-      case 'private.complete': {
-        try { this.store.change(state => { const action = state.actions[params.token]; if (action) Object.assign(action, { status: 'completed', result: params.result }); }); }
-        finally { this.steps.get(params.token)?.release(); this.steps.delete(params.token); }
-        return { completed: true };
+      case 'private.observe': {
+        const request = this.sessions.observations?.get(params.id);
+        if (params.finished) { if (request) request.finishedAt = Date.now(); }
+        else this.sessions.observations?.set(params.id, { queuedAt: Date.now(), startedAt: Date.now(), context: params.payload, model: params.model, messageCount: params.payload?.messages?.length ?? 0 });
+        return {};
       }
+      case 'private.release': this.steps.get(params.token)?.release(); this.steps.delete(params.token); return { released: true };
+      case 'private.action':
+        if (this.steps.get(params.turnToken)?.id !== params.id) throw new Error('This private turn is not admitted.');
+        if (this.store.state.actions[params.token]) throw new Error('This invocation already has a receipt; it was not replayed.');
+        this.store.change(state => { state.actions[params.token] = { status: 'started', conversationId: params.id, name: params.tool, args: params.args, callId: params.callId, sessionId: params.sessionId, startedAt: Date.now() }; });
+        return { recorded: true };
+      case 'private.complete':
+        this.store.change(state => { const action = state.actions[params.token]; if (action?.conversationId === params.id) Object.assign(action, { status: 'completed', result: params.result }); });
+        return { completed: true };
       case 'private.operation': {
         const row = this.store.row(params.id);
         switch (params.tool) {
@@ -170,7 +178,7 @@ export class Coordinator {
       case 'list': return this.store.list();
       case 'read': return this.inspect(params.id, params);
       case 'inspect.context': this.store.row(params.id); return this.sessions.inspect?.(params.id, true) ?? { context: null };
-      case 'actions': return Object.entries(this.store.state.actions).filter(([, action]) => action.status === 'started').map(([key, action]) => ({ key, ...action, active: this.gate.active?.id === key, resolvable: this.store.row(action.conversationId).blockedAction === key && this.gate.active?.id !== key }));
+      case 'actions': return Object.entries(this.store.state.actions).filter(([, action]) => action.status === 'started').map(([key, action]) => ({ key, ...action, active: this.actionActive(action), resolvable: this.store.row(action.conversationId).blockedAction === key && !this.actionActive(action) }));
       case 'resolve': return this.resolveAction(params);
       case 'foreground.update': this.foreground(params); return { registered: true };
       case 'foreground.enter': { const data = this.foreground({ ...params, busy: true }); await this.gate.foreground(params.id, data, this.signal); return { admitted: true }; }
@@ -194,10 +202,13 @@ export class Coordinator {
     if (!row) return false;
     this.running = true;
     try {
-      this.store.change(() => { const current = this.store.row(row.id); current.wakeId ??= randomUUID(); current.inProgress = true; });
-      const result = await this.sessions.step(this.store.row(row.id));
-      this.completeStep(row.id, this.store.row(row.id).stepCompleted ?? { ...result, completedAt: Date.now() });
-      this.errors.delete(row.id);
+      await this.gate.background(this.config.storeId + '/' + row.id, async () => {
+        if (this.stopping || this.store.state.paused) return;
+        this.store.change(() => { const current = this.store.row(row.id); current.wakeId ??= randomUUID(); current.inProgress = true; });
+        const result = await this.sessions.step(this.store.row(row.id));
+        this.completeStep(row.id, this.store.row(row.id).stepCompleted ?? { ...result, completedAt: Date.now() });
+        this.errors.delete(row.id);
+      }, this.signal);
     } catch (error) {
       if (!this.stopping && this.store.row(row.id).status === 'active') {
         this.errors.set(row.id, error.message);
@@ -218,9 +229,10 @@ export class Coordinator {
     this.stopping = true;
     // Let a currently executing model/tool finish. Wake blocked boundaries so
     // they can settle without starting another step. Never kill external work.
-    this.gate.stop();
-    while (this.running) await new Promise(resolve => setTimeout(resolve, 10));
     this.controller.abort();
+    if (this.ownsGate) this.gate.stop();
+    else this.gate.wake();
+    while (this.running) await new Promise(resolve => setTimeout(resolve, 10));
     await this.sessions.close();
   }
 }

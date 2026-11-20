@@ -9,9 +9,9 @@ export default function privateRuntime(pi) {
   pi.registerFlag('subconscious-config', { description: 'Originating coordinator configuration', type: 'string' });
   pi.registerFlag('subconscious-id', { description: 'Private conversation identifier', type: 'string' });
   const held = new Map();
-  let client, id, row, modelToken, finished = false, allowed;
+  let client, id, row, turnToken, finished = false, allowed;
   const call = (method, args = {}) => client.call(method, { id, ...args }, { timeout: 0 });
-  const releaseModel = async () => { if (modelToken) { const token = modelToken; modelToken = undefined; await call('private.release', { token }); } };
+  const releaseTurn = async () => { if (turnToken) { const token = turnToken; turnToken = undefined; await call('private.release', { token }); } };
   const register = (name, description, parameters) => pi.registerTool({ name, label: name, description, parameters, executionMode: 'sequential', async execute(callId, args, _signal, _update, ctx) {
     const result = await call('private.operation', { tool: name, args, key: invocationKey(ctx.sessionManager, callId), model: ctx.model });
     if (['subconscious_return', 'subconscious_finish'].includes(name)) finished = true;
@@ -38,18 +38,17 @@ export default function privateRuntime(pi) {
     return { message: { customType: 'pi-subconscious:instructions', display: false,
     content: 'This is your private thinking, not a message from a user. Keep your existing identity. Follow the thought in this private conversation until you decide it is finished. Use subconscious_return for a selected contribution, or subconscious_finish to end silently. Starting a user-facing chat is a separate, explicit action.\n\nOriginal thought: ' + row.content } };
   });
-  pi.on('before_provider_request', async (event, ctx) => {
-    await releaseModel(); modelToken = randomUUID();
-    await call('private.enter', { token: modelToken, kind: 'model', payload: event.payload, model: { provider: ctx.model.provider, id: ctx.model.id } });
+  pi.on('turn_start', async (_event, ctx) => {
+    turnToken = randomUUID();
+    try { await call('private.enter', { token: turnToken }); }
+    catch (error) { turnToken = undefined; ctx.abort(); throw error; }
   });
-  pi.on('message_end', async event => { if (event.message.role === 'assistant') await releaseModel(); });
-  pi.on('session_compact', releaseModel);
-  pi.on('session_compact_failed', releaseModel);
+  pi.on('before_provider_request', async (event, ctx) => { await call('private.observe', { payload: event.payload, model: { provider: ctx.model.provider, id: ctx.model.id } }); });
+  pi.on('message_end', event => { if (event.message.role === 'assistant') return call('private.observe', { finished: true }); });
   pi.on('tool_call', async (event, ctx) => {
-    await releaseModel();
     if (!allowed.has(event.toolName) || event.parentToolCallId) return { block: true, reason: 'This tool is unavailable in this private session.' };
     const key = invocationKey(ctx.sessionManager, event.toolCallId);
-    try { await call('private.enter', { token: key, kind: 'tool', tool: event.toolName, args: event.input, callId: event.toolCallId, sessionId: ctx.sessionManager.getSessionId() }); held.set(event.toolCallId, key); }
+    try { await call('private.action', { token: key, turnToken, tool: event.toolName, args: event.input, callId: event.toolCallId, sessionId: ctx.sessionManager.getSessionId() }); held.set(event.toolCallId, key); }
     catch (error) { return { block: true, reason: error.message }; }
   });
   pi.on('tool_execution_end', async event => {
@@ -57,9 +56,9 @@ export default function privateRuntime(pi) {
     held.delete(event.toolCallId);
     await call('private.complete', { token, result: { role: 'toolResult', toolCallId: event.toolCallId, toolName: event.toolName, ...event.result, isError: event.isError, timestamp: Date.now() } });
   });
-  pi.on('turn_end', async (_event, ctx) => { await releaseModel(); if (finished) void ctx.abort(); });
-  pi.on('agent_settled', releaseModel);
-  pi.on('session_shutdown', async () => { await releaseModel(); for (const token of held.values()) await call('private.release', { token }); });
+  pi.on('turn_end', async (_event, ctx) => { await releaseTurn(); if (finished) void ctx.abort(); });
+  pi.on('agent_settled', releaseTurn);
+  pi.on('session_shutdown', releaseTurn);
   pi.registerCommand('subconscious-step', { description: 'Continue this private conversation', handler: async text => {
     const { wakeId, content } = JSON.parse(text);
     pi.sendMessage({ customType: 'pi-subconscious:wake', content: 'Continue your private reflection. Original thought:\n' + content, display: false, details: { wakeId } }, { triggerTurn: true });
