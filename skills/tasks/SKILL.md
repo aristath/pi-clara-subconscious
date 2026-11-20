@@ -115,8 +115,9 @@ chats are idle. A deterministic function is one step, so keep it reasonably boun
 
 From a foreground chat, call `run_task({task: "example.js"})` to queue a task
 without waiting for its scheduled time or quiet period. Its regular schedule
-does not change. The host picks it up on a scheduler tick, through the same
-shared queue and chat-priority rules. The tool returns a queued receipt, not the
+does not change. The request enters the shared execution queue immediately,
+without waiting for a scheduler tick. It starts when chats are idle and earlier
+background work has finished. The tool returns a queued receipt, not the
 task's result; do not wait in the chat or claim that its work is finished.
 Queued requests survive restarts. Repeating the same tool invocation does not
 queue another run. Separate invocations request separate runs.

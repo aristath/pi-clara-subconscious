@@ -60,9 +60,10 @@ export class TaskScheduler {
     this.users = users; this.prepare = prepare; this.execute = execute; this.gate = gate;
     this.tickMs = tickMs; this.now = now; this.report = report;
     if (!Number.isFinite(tickMs) || tickMs <= 0) throw new Error('tasks.tickMs must be a positive number of milliseconds.');
-    this.states = new Map(); this.errors = new Map(); this.running = null; this.stopping = false;
+    this.states = new Map(); this.errors = new Map(); this.work = new Map(); this.stopping = false;
     this.clock = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
   }
+  get running() { return this.work.values().next().value ?? null; }
   dailyStart(time, clock, day = 0) {
     const parts = at => Object.fromEntries(this.clock.formatToParts(at).filter(p => p.type !== 'literal').map(p => [p.type, Number(p.value)]));
     const p = parts(time), [hour, minute] = clock.split(':').map(Number);
@@ -117,7 +118,21 @@ export class TaskScheduler {
       }
     }
     const request = state.requests[key];
+    if (request.startedAt === undefined) {
+      const task = await this.definition(user, request.name);
+      this.submit({ ...task, request: key, due: request.queuedAt });
+    }
     return { id: key, task: request.name, status: request.startedAt === undefined ? 'queued' : 'started' };
+  }
+  submit(task) {
+    if (this.stopping || (task.request && this.state(task.folder).value.requests[task.request].startedAt !== undefined)) return Promise.resolve();
+    const key = JSON.stringify([task.user.id, task.name, task.request]);
+    if (this.work.has(key)) return this.work.get(key);
+    const work = this.gate.background(task.user.id+'/'+task.name, () => this.run(task))
+      .catch(error => { if (!this.stopping) this.error(task.user.id+'/'+task.name, error); })
+      .finally(() => this.work.delete(key));
+    this.work.set(key, work);
+    return work;
   }
   async pending() {
     const pending = [];
@@ -166,10 +181,7 @@ export class TaskScheduler {
     if (this.running || this.stopping || this.gate.busy()) return false;
     const task = (await this.pending())[0];
     if (!task || this.running || this.stopping) return false;
-    const work = this.gate.background(task.user.id+'/'+task.name, () => this.run(task));
-    this.running = work;
-    try { await work; } catch (error) { if (!this.stopping) throw error; }
-    finally { this.running = null; }
+    await this.submit(task);
     return true;
   }
   async run(task) {
@@ -206,10 +218,16 @@ export class TaskScheduler {
       try { await this.tick(); } catch (error) { this.error('scheduler', error); }
       if (!this.stopping) this.timer = setTimeout(pump, this.tickMs);
     };
-    this.timer = setTimeout(pump, 0);
+    // Restore accepted manual requests before starting the timed schedule checks.
+    this.starting = this.pending().then(tasks => {
+      for (const task of tasks) if (task.request) this.submit(task);
+    }).catch(error => this.error('scheduler', error)).finally(() => {
+      if (!this.stopping) this.timer = setTimeout(pump, 0);
+    });
   }
   async close() {
     this.stopping = true; clearTimeout(this.timer); this.gate.stop();
-    await this.running;
+    await this.starting;
+    await Promise.all(this.work.values());
   }
 }

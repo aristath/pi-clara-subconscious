@@ -98,7 +98,7 @@ return function subconsciousExtension(pi) {
 
   pi.registerTool({
     name: 'run_task', label: 'Run task', executionMode: 'sequential',
-    description: 'Queue a task from this user’s tasks/ directory. Supply its .js or .ts filename. Skips its schedule and quiet period, keeps chat priority, and leaves its regular schedule unchanged. A queued receipt does not mean the task has completed.',
+    description: 'Submit a task from this user’s tasks/ directory directly to the shared execution queue, without waiting for a scheduler tick. Supply its .js or .ts filename. Skips its schedule and quiet period, keeps chat priority, and leaves its regular schedule unchanged. A queued receipt does not mean the task has completed.',
     parameters: Type.Object({ task: Type.String({ minLength: 1, description: 'Task filename, for example sleep.js.' }) }),
     async execute(callId, { task }, _signal, _update, context) {
       if (disabled) throw new Error('Request tasks from a foreground session.');

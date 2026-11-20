@@ -9,7 +9,7 @@ import { originContext } from '../src/native-operations.js';
 import { RETURN_TYPE } from '../src/private-extension.js';
 import { TaskScheduler } from '../src/tasks.js';
 import { runTask } from '../src/task-runner.js';
-import { fixture, foreground, output, call, deferred, assistantMessage } from './helpers.js';
+import { fixture, foreground, output, call, deferred, assistantMessage, until } from './helpers.js';
 
 async function closeSession(session) {
   await session.extensionRunner.emit({ type: 'session_shutdown', reason: 'quit' });
@@ -116,7 +116,8 @@ test('the run_task tool returns a queued receipt before chat finishes, then runs
   const receipt = session.messages.find(message => message.role === 'toolResult' && message.toolCallId === 'manual-call');
   assert.equal(receipt.details.status, 'queued'); assert.equal(receipt.details.task, 'example.js');
   assert.equal(await scheduler.tick(), false, 'task started before its requesting chat finished');
-  finish.resolve(); await chat; await scheduler.tick();
+  finish.resolve(); await chat;
+  await until(() => !scheduler.running);
   assert.equal(await readFile(join(f.workspace, 'tasks/result.txt'), 'utf8'), 'owner');
   assert.equal(scheduler.state(f.workspace).value.tasks['example.js'].nextRun, scheduled);
 });

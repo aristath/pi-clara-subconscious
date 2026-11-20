@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TaskScheduler, interval, nextRun, taskHeader } from '../src/tasks.js';
 import { runTask } from '../src/task-runner.js';
-import { deferred } from './helpers.js';
+import { deferred, until } from './helpers.js';
 
 const header = (every='5 minutes', mode='deterministic', session='fresh') => `/**\n * @every ${every}\n * @mode ${mode}\n * @session ${session}\n */\n`;
 async function fixture(t) {
@@ -157,8 +157,12 @@ test('manual requests survive restart, stay with their owner and wait for chat w
   await assert.rejects(scheduler.request('first', 'leak.js', 'bad-link'), /outside/);
   await assert.rejects(scheduler.request('missing-user', 'manual.js', 'bad-owner'), /owner/);
   await scheduler.close();
-  scheduler = new TaskScheduler({ ...f.options, execute: async task => seen.push(task.user.id) });
-  await scheduler.tick(); await scheduler.tick();
+  scheduler = new TaskScheduler({ ...f.options, tickMs: 86400000, execute: async task => seen.push(task.user.id) });
+  await scheduler.gate.foreground('chat', { pid: process.pid });
+  scheduler.start();
+  await until(() => scheduler.gate.jobs.length === 2);
+  scheduler.gate.remove('chat');
+  await until(() => seen.length === 2 && !scheduler.running);
   assert.deepEqual(seen, ['first', 'second']);
   assert.deepEqual(scheduler.state(f.users[0].folder).value.tasks['manual.js'], scheduled);
   assert.equal((await scheduler.request('first', 'manual.js', 'first-invocation')).status, 'started');
@@ -173,10 +177,32 @@ test('a manual daily run skips quiet time without consuming an overdue scheduled
   const scheduler = new TaskScheduler({ ...f.options, timeZone: 'UTC', execute: async task => seen.push(task.request ?? 'scheduled') });
   await scheduler.pending();
   const row = scheduler.state(f.users[0].folder).value.tasks['daily.js'], next = row.nextRun;
-  await scheduler.request('first', 'daily.js', 'manual'); await scheduler.tick();
+  await scheduler.request('first', 'daily.js', 'manual');
+  await until(() => seen.length === 1 && !scheduler.running);
   assert.equal(row.nextRun, next); assert.equal(row.lastStarted, undefined);
   assert.equal(await scheduler.tick(), false);
   f.advance(3600000); await scheduler.tick();
   assert.deepEqual(seen, ['manual', 'scheduled']);
+  await scheduler.close();
+});
+
+test('manual requests enter the shared FIFO queue without starting or ticking the scheduler', async t => {
+  const f = await fixture(t), seen = [], finish = deferred();
+  await f.task(0, 'manual.js', header('6 months'));
+  await f.task(1, 'manual.js', header('6 months'));
+  const scheduler = new TaskScheduler({ ...f.options, execute: async task => seen.push(task.user.id) });
+  const earlier = scheduler.gate.background('earlier-reflection', () => finish.promise);
+  await Promise.all([
+    scheduler.request('first', 'manual.js', 'same-key'),
+    scheduler.request('first', 'manual.js', 'same-key'),
+  ]);
+  await scheduler.request('second', 'manual.js', 'same-key');
+  assert.equal(scheduler.gate.jobs.length, 3, 'manual requests were not submitted directly or were duplicated');
+  assert.deepEqual(seen, []);
+  finish.resolve(); await earlier;
+  await until(() => seen.length === 2 && !scheduler.running);
+  assert.deepEqual(seen, ['first', 'second']);
+  assert.equal((await scheduler.request('first', 'manual.js', 'same-key')).status, 'started');
+  assert.equal(scheduler.gate.jobs.length, 0);
   await scheduler.close();
 });

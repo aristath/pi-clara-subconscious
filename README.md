@@ -66,8 +66,9 @@ Standalone installations retain automatic daemon startup by default.
 The foreground `run_task({task: "example.js"})` tool queues an on-demand run
 without changing its regular schedule. Hosts connect it with
 `startService(config, { gate, enqueueTask: (name, key) => scheduler.request(userId, name, key) })`.
-Requests stay in the owner's existing task progress file until picked up by the
-shared queue. Scheduled time and quiet periods are skipped; chat priority remains.
+Requests are saved in the owner's existing task progress file and submitted to
+the shared queue immediately, without waiting for a scheduler tick. Scheduled
+time and quiet periods are skipped; chat priority remains.
 
 ## Install
 
