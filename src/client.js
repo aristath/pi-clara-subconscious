@@ -31,6 +31,7 @@ export class Client {
   async ensure() {
     try { await this.call('ping'); return; }
     catch (error) { if (!['ENOENT', 'ECONNREFUSED'].includes(error.code)) throw error; }
+    if (this.config.autoStart === false) throw new Error('The reflection coordinator is managed by the host application and is not running.');
     if (!this.starting) this.starting = this.start().finally(() => { this.starting = null; });
     return this.starting;
   }

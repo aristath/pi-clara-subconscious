@@ -46,6 +46,7 @@ export function loadConfig(path = defaultConfigPath(), overrides = {}) {
     profileRoot: base, sourceRoots: [],
     executionCwd: expandPath(raw.cwd ?? base, base),
     piCommand: raw.piCommand ?? 'pi',
+    autoStart: raw.autoStart !== false,
     initiallyPaused: raw.initiallyPaused === true,
     errorRetryMs: raw.errorRetryMs ?? 30000,
     heartbeatMs: raw.heartbeatMs ?? 3000,

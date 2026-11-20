@@ -59,6 +59,9 @@ Pass the same `gate` to `TaskScheduler` and each reflection `startService(config
 to share one FIFO background queue across users. A background job keeps its place
 while yielding to chats between turns. Pi handles tool execution, compaction,
 retry and cancellation; tools do not acquire scheduling locks.
+Set `subconscious.autoStart: false` in Pi settings when the host owns the
+coordinator, so standalone Pi clients cannot start a competing daemon while it restarts.
+Standalone installations retain automatic daemon startup by default.
 
 ## Install
 
