@@ -1,10 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import extension from '../src/extension.js';
 import { startService } from '../src/service.js';
 import { originContext } from '../src/native-operations.js';
 import { RETURN_TYPE } from '../src/private-extension.js';
+import { TaskScheduler } from '../src/tasks.js';
+import { runTask } from '../src/task-runner.js';
 import { fixture, foreground, output, call, deferred, assistantMessage } from './helpers.js';
 
 async function closeSession(session) {
@@ -85,4 +89,34 @@ test('Pi-native commands inspect and pause without adding a user message or call
   assert.equal(requests, 0);
   await session.prompt('/subconscious resume');
   assert.equal(service.coordinator.store.state.paused, false);
+});
+
+test('the run_task tool returns a queued receipt before chat finishes, then runs the owning task', async t => {
+  const finish = deferred(), replying = deferred();
+  let session, service, scheduler;
+  t.after(async () => {
+    finish.resolve();
+    if (session) { await session.abort(); await closeSession(session); }
+    await service?.close(); await scheduler?.close();
+  });
+  const f = fixture(t, { initiallyPaused: true });
+  await mkdir(join(f.workspace, 'tasks'));
+  await writeFile(join(f.workspace, 'tasks/example.js'), '/**\n * @every 6 months\n * @quiet_window 1h\n * @mode deterministic\n */\nexport default async ({user}) => { const {writeFile} = await import("node:fs/promises"); await writeFile("tasks/result.txt", user); };');
+  scheduler = new TaskScheduler({ users: async () => [{ id: 'owner', folder: f.workspace }],
+    prepare: async () => ({ workspace: f.workspace, agentDir: f.agentDir }), execute: runTask });
+  await scheduler.pending();
+  const scheduled = scheduler.state(f.workspace).value.tasks['example.js'].nextRun;
+  service = await startService(f.config, { schedule: false, gate: scheduler.gate, enqueueTask: (name, key) => scheduler.request('owner', name, key) });
+  let requests = 0;
+  session = await foreground(f.config, extension, async () => {
+    if (++requests === 1) return output([call('run_task', { task: 'example.js' }, 'manual-call')]);
+    replying.resolve(); await finish.promise; return output('The task is queued.');
+  });
+  const chat = session.prompt('Run the example task.'); await replying.promise;
+  const receipt = session.messages.find(message => message.role === 'toolResult' && message.toolCallId === 'manual-call');
+  assert.equal(receipt.details.status, 'queued'); assert.equal(receipt.details.task, 'example.js');
+  assert.equal(await scheduler.tick(), false, 'task started before its requesting chat finished');
+  finish.resolve(); await chat; await scheduler.tick();
+  assert.equal(await readFile(join(f.workspace, 'tasks/result.txt'), 'utf8'), 'owner');
+  assert.equal(scheduler.state(f.workspace).value.tasks['example.js'].nextRun, scheduled);
 });

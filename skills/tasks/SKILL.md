@@ -107,9 +107,19 @@ until that task finishes, including while it is waiting for a frontend chat.
 Overdue intervals do not create a backlog of duplicate occurrences.
 
 Frontend chats always take priority. Tasks wait while any frontend chat is
-running. If a message arrives during inference or a tool call, that call finishes,
-then the task waits before its next call. It resumes when frontend chats are idle.
-A deterministic function is one call, so keep it reasonably bounded.
+running. If a message arrives during a Pi turn, that turn (model response and its
+tools) finishes, then the task waits before its next turn. It resumes when frontend
+chats are idle. A deterministic function is one step, so keep it reasonably bounded.
+
+### Run on demand
+
+From a foreground chat, call `run_task({task: "example.js"})` to queue a task
+without waiting for its scheduled time or quiet period. Its regular schedule
+does not change. The host picks it up on a scheduler tick, through the same
+shared queue and chat-priority rules. The tool returns a queued receipt, not the
+task's result; do not wait in the chat or claim that its work is finished.
+Queued requests survive restarts. Repeating the same tool invocation does not
+queue another run. Separate invocations request separate runs.
 
 ## Changes and stored progress
 

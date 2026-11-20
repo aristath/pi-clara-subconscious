@@ -29,12 +29,13 @@ export default function privateRuntime(pi) {
     if (!ctx.sessionManager.getEntries().some(entry => entry.type === 'custom' && entry.customType === PRIVATE_MARKER)) throw new Error('Private session marker missing.');
     allowed = new Set(pi.getSettings().subconscious?.allowedTools ?? pi.getActiveTools());
     allowed.delete('subconscious_reflect');
+    allowed.delete('run_task');
     for (const name of INTERNAL_TOOLS) allowed.add(name);
     pi.setActiveTools([...allowed]);
   });
   pi.on('before_agent_start', () => {
     allowed = new Set(pi.getSettings().subconscious?.allowedTools ?? pi.getActiveTools());
-    allowed.delete('subconscious_reflect'); for (const name of INTERNAL_TOOLS) allowed.add(name); pi.setActiveTools([...allowed]);
+    allowed.delete('subconscious_reflect'); allowed.delete('run_task'); for (const name of INTERNAL_TOOLS) allowed.add(name); pi.setActiveTools([...allowed]);
     return { message: { customType: 'pi-subconscious:instructions', display: false,
     content: 'This is your private thinking, not a message from a user. Keep your existing identity. Follow the thought in this private conversation until you decide it is finished. Use subconscious_return for a selected contribution, or subconscious_finish to end silently. Starting a user-facing chat is a separate, explicit action.\n\nOriginal thought: ' + row.content } };
   });

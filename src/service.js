@@ -50,6 +50,7 @@ export class Coordinator {
     this.sessions = options.sessions ?? new PiSessions(this, options);
     this.running = false; this.stopping = false;
     this.requestPi = options.requestPi ?? piRequest;
+    this.enqueueTask = options.enqueueTask;
     this.steps = new Map();
     for (const row of this.store.list()) if (row.stepCompleted) this.completeStep(row.id, row.stepCompleted);
   }
@@ -189,6 +190,9 @@ export class Coordinator {
         const result = this.store.reflect(source.thought, source, `${source.sessionId}:${source.entryId}:${source.callId}`);
         this.gate.wake(); return { id: result.id, status: result.status };
       }
+      case 'task.enqueue':
+        if (!this.enqueueTask) throw new Error('This host has not enabled task execution.');
+        return this.enqueueTask(params.task, params.key);
       case 'deliveries': return this.pending(params.clientId);
       case 'notifications': return Object.values(this.store.state.deliveries).filter(row => row.kind === 'new-chat' && row.status === 'available');
       case 'notification.ack': this.store.change(state => { const row = state.deliveries[params.id]; if (!row || row.kind !== 'new-chat') throw new Error('Notification not found'); row.status = 'acknowledged'; }); return { acknowledged: true };

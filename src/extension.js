@@ -5,6 +5,7 @@ import { Client } from './client.js';
 import { loadConfig, TASK_MARKER } from './config.js';
 import { deliveredIds } from './native-operations.js';
 import { toolResult, PRIVATE_MARKER, RETURN_TYPE } from './private-extension.js';
+import { invocationKey } from './invocations.js';
 
 export function createExtension(deps = {}) {
 return function subconsciousExtension(pi) {
@@ -95,6 +96,16 @@ return function subconsciousExtension(pi) {
   });
   pi.on('session_shutdown', stop);
 
+  pi.registerTool({
+    name: 'run_task', label: 'Run task', executionMode: 'sequential',
+    description: 'Queue a task from this user’s tasks/ directory. Supply its .js or .ts filename. Skips its schedule and quiet period, keeps chat priority, and leaves its regular schedule unchanged. A queued receipt does not mean the task has completed.',
+    parameters: Type.Object({ task: Type.String({ minLength: 1, description: 'Task filename, for example sleep.js.' }) }),
+    async execute(callId, { task }, _signal, _update, context) {
+      if (disabled) throw new Error('Request tasks from a foreground session.');
+      await enter(context);
+      return toolResult(await client.call('task.enqueue', { task, key: invocationKey(context.sessionManager, callId) }));
+    },
+  });
   pi.registerTool({
     name: 'subconscious_reflect', label: 'Private reflection', executionMode: 'sequential',
     description: 'Set a thought aside in its own private Pi conversation. The runtime binds it to this exact chat. Only a successful receipt means it was saved.',

@@ -6,7 +6,7 @@ export default function scheduledTask(pi) {
   const release = ctx => { if (token) { ctx.ui.notify('pi-task:release:' + token, 'info'); token = undefined; } };
   pi.on('session_start', (_event, ctx) => {
     if (!ctx.sessionManager.getEntries().some(entry => entry.type === 'custom' && entry.customType === TASK_MARKER)) pi.appendEntry(TASK_MARKER, { file: pi.getFlag('scheduled-task') });
-    pi.setActiveTools(pi.getActiveTools().filter(name => name !== 'subconscious_reflect'));
+    pi.setActiveTools(pi.getActiveTools().filter(name => !['subconscious_reflect', 'run_task'].includes(name)));
   });
   pi.on('turn_start', async (_event, ctx) => {
     try {

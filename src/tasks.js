@@ -95,12 +95,36 @@ export class TaskScheduler {
     if (this.errors.get(key) !== error.message) this.report(`Scheduled task ${key}: ${error.message}`);
     this.errors.set(key, error.message);
   }
+  async definition(user, name) {
+    if (typeof name !== 'string' || !/^[^/\\]+\.(?:js|ts)$/.test(name)) throw new Error('Supply a task filename ending in .js or .ts.');
+    const root = await realpath(user.folder), path = await realpath(join(root, 'tasks', name));
+    if (!inside(root, path)) throw new Error('Task file points outside its owner’s profile.');
+    return { ...taskHeader(await readFile(path, 'utf8')), user, folder: user.folder, name, path };
+  }
+  async request(userId, name, key) {
+    if (this.stopping) throw new Error('The task runner is stopping.');
+    if (typeof key !== 'string' || !key) throw new Error('A task invocation receipt is required.');
+    const user = (await this.users()).find(user => user.id === userId);
+    if (!user) throw new Error('Task owner is unavailable.');
+    const state = this.state(user.folder).value;
+    if (!Object.hasOwn(state.requests ?? {}, key)) {
+      await this.definition(user, name);
+      if (!Object.hasOwn(state.requests ?? {}, key)) {
+        state.tasks[name] ??= { createdAt: this.now() };
+        (state.requests ??= {})[key] = { name, queuedAt: this.now() };
+        try { this.save(user.folder); }
+        catch (error) { delete state.requests[key]; throw error; }
+      }
+    }
+    const request = state.requests[key];
+    return { id: key, task: request.name, status: request.startedAt === undefined ? 'queued' : 'started' };
+  }
   async pending() {
     const pending = [];
     for (const user of await this.users()) {
       const folder = user.folder;
       try {
-        const root = await realpath(folder), directory = join(folder, 'tasks');
+        const directory = join(folder, 'tasks');
         let files;
         try { files = await readdir(directory, { withFileTypes: true }); }
         catch (error) { if (error.code === 'ENOENT') continue; throw error; }
@@ -110,23 +134,24 @@ export class TaskScheduler {
           if (!file.isFile() || !/\.(?:js|ts)$/.test(file.name)) continue;
           const key = user.id + '/' + file.name;
           try {
-            const path = await realpath(join(directory, file.name));
-            if (!inside(root, path)) throw new Error('Task file points outside its owner’s profile.');
-            const header = taskHeader(await readFile(path, 'utf8'));
+            const task = await this.definition(user, file.name);
             let row = state.value.tasks[file.name];
             if (!row) { row = state.value.tasks[file.name] = { createdAt: this.now() }; changed = true; }
-            if (header.start_time !== undefined) {
-              const due = Math.max(this.latestStart(this.now(), header.start_time), this.dailyStart(row.createdAt, header.start_time));
-              const next = row.lastStarted >= due ? this.dailyStart(due, header.start_time, 1) : due;
-              if (row.nextRun !== next || row.start_time !== header.start_time || row.every !== undefined) {
-                row.nextRun = next; row.start_time = header.start_time; delete row.every; changed = true;
+            if (task.start_time !== undefined) {
+              const due = Math.max(this.latestStart(this.now(), task.start_time), this.dailyStart(row.createdAt, task.start_time));
+              const next = row.lastStarted >= due ? this.dailyStart(due, task.start_time, 1) : due;
+              if (row.nextRun !== next || row.start_time !== task.start_time || row.every !== undefined) {
+                row.nextRun = next; row.start_time = task.start_time; delete row.every; changed = true;
               }
-            } else if (row.nextRun === undefined || row.start_time !== undefined || JSON.stringify(row.every) !== JSON.stringify(header.every)) {
+            } else if (row.nextRun === undefined || row.start_time !== undefined || JSON.stringify(row.every) !== JSON.stringify(task.every)) {
               delete row.start_time;
-              row.every = header.every; row.nextRun = nextRun(row.lastStarted ?? row.createdAt, header.every); changed = true;
+              row.every = task.every; row.nextRun = nextRun(row.lastStarted ?? row.createdAt, task.every); changed = true;
             }
             this.errors.delete(key);
-            if (row.nextRun <= this.now() && this.quiet(header)) pending.push({ ...header, user, folder, name: file.name, path, due: row.nextRun });
+            if (row.nextRun <= this.now() && this.quiet(task)) pending.push({ ...task, due: row.nextRun });
+            for (const [key, request] of Object.entries(state.value.requests ?? {})) {
+              if (request.name === file.name && request.startedAt === undefined) pending.push({ ...task, request: key, due: request.queuedAt });
+            }
           } catch (error) { this.error(key, error); }
         }
         // Deleting a task removes only its schedule. Its conversations remain.
@@ -151,14 +176,17 @@ export class TaskScheduler {
     let release;
     try {
       release = await this.gate.privateStep('task', task.user.id+'/'+task.name);
-      if (!this.quiet(task)) return;
-      const row = this.state(task.folder).value.tasks[task.name];
+      if (!task.request && !this.quiet(task)) return;
+      const state = this.state(task.folder).value, row = state.tasks[task.name];
       // Record the occurrence before executing user code. A service crash does
       // not replay already-started deterministic effects.
-      row.lastStarted = this.now();
-      row.nextRun = task.start_time !== undefined
-        ? this.dailyStart(this.latestStart(row.lastStarted, task.start_time), task.start_time, 1)
-        : nextRun(row.lastStarted, task.every);
+      if (task.request) state.requests[task.request].startedAt = this.now();
+      else {
+        row.lastStarted = this.now();
+        row.nextRun = task.start_time !== undefined
+          ? this.dailyStart(this.latestStart(row.lastStarted, task.start_time), task.start_time, 1)
+          : nextRun(row.lastStarted, task.every);
+      }
       this.save(task.folder);
       const context = await this.prepare(task.user);
       if (this.stopping) return;

@@ -63,6 +63,12 @@ Set `subconscious.autoStart: false` in Pi settings when the host owns the
 coordinator, so standalone Pi clients cannot start a competing daemon while it restarts.
 Standalone installations retain automatic daemon startup by default.
 
+The foreground `run_task({task: "example.js"})` tool queues an on-demand run
+without changing its regular schedule. Hosts connect it with
+`startService(config, { gate, enqueueTask: (name, key) => scheduler.request(userId, name, key) })`.
+Requests stay in the owner's existing task progress file until picked up by the
+shared queue. Scheduled time and quiet periods are skipped; chat priority remains.
+
 ## Install
 
 Requires Linux, Node.js 22.18+, and Pi 1.5.2+.

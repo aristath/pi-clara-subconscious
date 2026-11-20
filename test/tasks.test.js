@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, rm, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm, unlink, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TaskScheduler, interval, nextRun, taskHeader } from '../src/tasks.js';
@@ -136,5 +136,47 @@ test('deterministic JS and TS execute once in their owner cwd without inference'
   for(const user of f.users)assert.equal(await readFile(join(user.folder,'tasks/output.txt'),'utf8'),user.id+':'+user.folder);
   assert.equal(await scheduler.tick(),false);
   assert.equal(scheduler.errors.size,0);
+  await scheduler.close();
+});
+
+test('manual requests survive restart, stay with their owner and wait for chat without changing the schedule', async t => {
+  const f = await fixture(t), seen = [];
+  const source = '/**\n * @start_time 23:00\n * @quiet_window 30m\n * @mode deterministic\n */\nexport default () => {};';
+  await f.task(0, 'manual.js', source); await f.task(1, 'manual.js', source);
+  let scheduler = new TaskScheduler({ ...f.options, execute: async task => seen.push(task.user.id) });
+  await scheduler.pending();
+  const scheduled = structuredClone(scheduler.state(f.users[0].folder).value.tasks['manual.js']);
+  await scheduler.gate.foreground('chat', { pid: process.pid });
+  const receipt = await scheduler.request('first', 'manual.js', 'first-invocation');
+  assert.equal(receipt.status, 'queued');
+  assert.deepEqual(await scheduler.request('first', 'manual.js', 'first-invocation'), receipt);
+  f.advance(1); await scheduler.request('second', 'manual.js', 'second-invocation');
+  assert.equal(await scheduler.tick(), false); assert.deepEqual(seen, []);
+  await assert.rejects(scheduler.request('first', '../second/tasks/manual.js', 'bad-path'), /filename/);
+  await symlink(join(f.users[1].folder, 'tasks/manual.js'), join(f.users[0].folder, 'tasks/leak.js'));
+  await assert.rejects(scheduler.request('first', 'leak.js', 'bad-link'), /outside/);
+  await assert.rejects(scheduler.request('missing-user', 'manual.js', 'bad-owner'), /owner/);
+  await scheduler.close();
+  scheduler = new TaskScheduler({ ...f.options, execute: async task => seen.push(task.user.id) });
+  await scheduler.tick(); await scheduler.tick();
+  assert.deepEqual(seen, ['first', 'second']);
+  assert.deepEqual(scheduler.state(f.users[0].folder).value.tasks['manual.js'], scheduled);
+  assert.equal((await scheduler.request('first', 'manual.js', 'first-invocation')).status, 'started');
+  assert.equal(await scheduler.tick(), false, 'repeated invocation queued another run');
+  await scheduler.close();
+});
+
+test('a manual daily run skips quiet time without consuming an overdue scheduled run', async t => {
+  const f = await fixture(t), seen = [];
+  f.setTime(Date.UTC(2026, 0, 31, 23, 10));
+  await f.task(0, 'daily.js', '/**\n * @start_time 23:00\n * @quiet_window 1h\n * @mode deterministic\n */');
+  const scheduler = new TaskScheduler({ ...f.options, timeZone: 'UTC', execute: async task => seen.push(task.request ?? 'scheduled') });
+  await scheduler.pending();
+  const row = scheduler.state(f.users[0].folder).value.tasks['daily.js'], next = row.nextRun;
+  await scheduler.request('first', 'daily.js', 'manual'); await scheduler.tick();
+  assert.equal(row.nextRun, next); assert.equal(row.lastStarted, undefined);
+  assert.equal(await scheduler.tick(), false);
+  f.advance(3600000); await scheduler.tick();
+  assert.deepEqual(seen, ['manual', 'scheduled']);
   await scheduler.close();
 });
