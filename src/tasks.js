@@ -50,7 +50,8 @@ export function taskHeader(source) {
   const session = fields.session ?? 'fresh';
   if (!['fresh', 'continue'].includes(session)) throw new Error('@session must be fresh or continue.');
   if (fields.model !== undefined && !/^[^\s/]+\/\S+$/.test(fields.model)) throw new Error('@model must be provider/model-id.');
-  return { ...schedule, mode: fields.mode, session, ...(fields.model !== undefined ? { model: fields.model } : {}) };
+  if (fields.soul !== undefined && fields.soul !== 'none') throw new Error('Use @soul none to disable SOUL loading, or omit it to use the execution profile.');
+  return { ...schedule, mode: fields.mode, session, ...(fields.model !== undefined ? { model: fields.model } : {}), ...(fields.soul !== undefined ? { soul: fields.soul } : {}) };
 }
 
 const inside = (root, path) => { const part = relative(root, path); return part !== '..' && !part.startsWith('../') && !isAbsolute(part); };

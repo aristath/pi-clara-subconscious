@@ -56,6 +56,12 @@ inference run, including continued sessions. It uses Pi's native `--model`
 option and does not change profile or global defaults. Omit it to retain Pi's
 normal default/resume model selection. Deterministic tasks do not use a model.
 
+Optional `@soul none` disables the pi-modular-soul package for that inference
+process: no SOUL content, loading instructions, tools, or commands are added.
+It also applies when continuing a task with a saved SOUL selection. Omit it to
+keep the execution profile's normal SOUL behavior. Other Pi instructions and
+tools remain available. Requires pi-modular-soul with `--soul none` support.
+
 The host application uses `TaskScheduler` from `src/tasks.js` and `runTask` from
 `src/task-runner.js`. Its foreground admission uses the scheduler’s existing
 `Gate`. Task execution happens in a separate process using the selected execution profile.

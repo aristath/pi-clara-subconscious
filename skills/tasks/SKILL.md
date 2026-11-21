@@ -89,6 +89,12 @@ This selects the model on every run, including a continued session, without
 changing shared or profile defaults. Omit it for Pi's normal default/resume
 behavior. Deterministic tasks do not call a model.
 
+Use `@soul none` in an inference task header to run without SOUL content,
+SOUL instructions, or SOUL tools. This requires pi-modular-soul with
+`--soul none` support and applies to both fresh and continued task sessions.
+Other Pi instructions and tools still apply. Omit the header for normal SOUL
+loading from the execution profile.
+
 ### Execution profile
 
 The host can supply an `executionCwd` for inference. Pi loads that working directory's normal `.pi/settings.json`, extensions, SOUL and tools. The task function still receives its originating owner's `cwd` and `user`. Return explicit source paths in the prompt when referring to that owner's files. Execution profile configuration is separate from task ownership and saved task progress.
