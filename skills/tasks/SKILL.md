@@ -83,6 +83,12 @@ own conversation; it does not reuse a frontend chat. Native Pi loads the executi
 settings, extensions, model, and permitted tools. The prompt is passed as a task custom
 message; the scheduler does not add an agenda or require a particular result.
 
+Add `@model provider/model-id` to the task header to choose its inference model.
+The model must be available in the execution profile's Pi configuration.
+This selects the model on every run, including a continued session, without
+changing shared or profile defaults. Omit it for Pi's normal default/resume
+behavior. Deterministic tasks do not call a model.
+
 ### Execution profile
 
 The host can supply an `executionCwd` for inference. Pi loads that working directory's normal `.pi/settings.json`, extensions, SOUL and tools. The task function still receives its originating owner's `cwd` and `user`. Return explicit source paths in the prompt when referring to that owner's files. Execution profile configuration is separate from task ownership and saved task progress.

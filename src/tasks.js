@@ -49,7 +49,8 @@ export function taskHeader(source) {
   if (!['deterministic', 'inference'].includes(fields.mode)) throw new Error('@mode must be deterministic or inference.');
   const session = fields.session ?? 'fresh';
   if (!['fresh', 'continue'].includes(session)) throw new Error('@session must be fresh or continue.');
-  return { ...schedule, mode: fields.mode, session };
+  if (fields.model !== undefined && !/^[^\s/]+\/\S+$/.test(fields.model)) throw new Error('@model must be provider/model-id.');
+  return { ...schedule, mode: fields.mode, session, ...(fields.model !== undefined ? { model: fields.model } : {}) };
 }
 
 const inside = (root, path) => { const part = relative(root, path); return part !== '..' && !part.startsWith('../') && !isAbsolute(part); };

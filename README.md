@@ -41,6 +41,7 @@ A continuing inference task:
  * @every 13h
  * @mode inference
  * @session continue
+ * @model my-provider/my-model
  */
 export default 'Continue the work described in this task’s notebook.';
 ```
@@ -49,6 +50,11 @@ Inference tasks use the host's `executionCwd`, or their owner's directory when n
 
 Intervals include calendar months, such as `@every 6 months`. Inference defaults
 to `@session fresh` unless the definition says `continue`.
+
+Optional `@model provider/model-id` selects a configured Pi model for each
+inference run, including continued sessions. It uses Pi's native `--model`
+option and does not change profile or global defaults. Omit it to retain Pi's
+normal default/resume model selection. Deterministic tasks do not use a model.
 
 The host application uses `TaskScheduler` from `src/tasks.js` and `runTask` from
 `src/task-runner.js`. Its foreground admission uses the scheduler’s existing

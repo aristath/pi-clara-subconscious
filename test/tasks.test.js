@@ -28,6 +28,8 @@ test('task headers support both modes, session choices, fixed intervals and cale
   assert.deepEqual(taskHeader('/**\n * @start_time 00:00\n * @quiet_window 30m\n * @mode inference\n */'), {start_time:'00:00',quiet_window:1800000,mode:'inference',session:'fresh'});
   assert.throws(()=>taskHeader('/**\n * @start_time 24:00\n * @mode inference\n */'), /HH:mm/);
   assert.equal(taskHeader(header()).quiet_window, undefined);
+  assert.equal(taskHeader(header('5m','inference').replace('@mode inference','@mode inference\n * @model example/models/chat')).model,'example/models/chat');
+  assert.throws(()=>taskHeader(header('5m','inference').replace('@mode inference','@mode inference\n * @model incomplete')),/@model/);
   assert.deepEqual(taskHeader('/**\n * @start_time 02:00\n * @mode deterministic\n */'), {start_time:'02:00',mode:'deterministic',session:'fresh'});
   assert.throws(()=>taskHeader(header().replace('@every 5 minutes','@every 5 minutes\n * @quiet_window 1 month')), /fixed duration/);
 });
